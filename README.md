@@ -201,6 +201,7 @@ After that, the background poller runs every hour and tags new photos automatica
 | `SCAN_WORKERS` | `GPU_WORKERS × 32` | Concurrent thumbnail fetches. Auto-derived to keep GPU batches full. Override only if Immich feels slow during scans. |
 | `GPU_WORKERS` | `2` (GPU) / `1` (CPU) | Parallel YOLO and CLIP inference threads. `2` is optimal for GPU; CPU defaults to `1` since a second worker just duplicates the models in RAM with no throughput gain. |
 | `YOLO_INPUT_SIZE` | `640` | YOLO detection resolution in pixels. Higher values improve detection of small animals at the cost of more memory and compute. Must be a multiple of 32. |
+| `YOLO_CONF` | `0.10` | Minimum YOLO confidence for a detection to be cropped and classified. Deliberately lower than Ultralytics' own `0.25` default: a detection here only has to be good enough to crop on, since CLIP and the classifier decide what the animal actually is. At `0.25`, pets that are small in frame, turned away, partly hidden, blurred or in low light are missed entirely and fall back to whole-photo matching. Raise it if scans are slow or you see crops of non-animals; lower it if pets are being missed. |
 | `YOLO_BATCH_SIZE` | `32` | Max images per YOLO inference batch. Reduce if you hit GPU out-of-memory errors. |
 | `EMBED_CACHE_SIZE` | `5000` | Max number of embeddings kept in the in-memory LRU cache. Older entries are evicted when the limit is reached. |
 | `THRESHOLD` | `0.8` | Min confidence (0–1) to tag a photo |

@@ -189,8 +189,13 @@ function renderPhotoItems(a, thr) {
   const badge = a.score != null
     ? `<div class="score-badge ${a.score < thr ? 'score-low' : 'score-ok'}">${Math.round(a.score * 100)}%</div>`
     : '';
+  // No animal was detected, so this is the whole photo and the score describes
+  // the whole scene. Flag it: accepting one as a reference teaches the
+  // classifier to match on background instead of on the pet.
+  const fullImageBadge = a.full_image ? '<div class="full-image-badge">Full photo</div>' : '';
   const title = a.pet_name
-    ? `${fmtDate(a.date)} · ${Math.round(a.score * 100)}% ${a.pet_name}`
+    ? `${fmtDate(a.date)} · ${Math.round(a.score * 100)}% ${a.pet_name}` +
+      (a.full_image ? ' · whole photo, no animal detected' : '')
     : `${a.filename || ''} · ${fmtDate(a.date)}`;
   const makeItem = (key, src, cropIdx, bbox) => {
     const cropIdxAttr = cropIdx != null ? `data-crop-idx="${cropIdx}"` : '';
@@ -201,6 +206,7 @@ function renderPhotoItems(a, thr) {
       <a class="photo-open" href="${immichUrl}/photos/${a.id}" target="_blank" rel="noopener" onclick="event.stopPropagation()">⤢</a>
       <div class="photo-check">✓</div>
       ${badge}
+      ${fullImageBadge}
     </div>`;
   };
   if (a.crops && a.crops.length > 0) {
@@ -614,6 +620,7 @@ function showScanResult(r) {
       '<div class="poll-stats" style="margin-top:6px;">' +
       stat('Tagged', c.added || 0, 'nonzero-good') +
       stat('Low conf.', c.low_confidence || 0, 'nonzero-warn') +
+      stat('Full photo', c.full_image || 0, 'nonzero-warn') +
       stat('Other', c.unknown || 0, '') +
       stat('Already tagged', c.already_tagged || 0, '') +
       (c.failed > 0 ? stat('Failed', c.failed, 'nonzero-bad') : '') +
@@ -631,18 +638,21 @@ function showScanResult(r) {
   }
   if (r.counts) {
     const c = r.counts;
+    // Both buckets land in the same review queue: below-threshold matches and
+    // whole-photo matches, which are never auto-tagged however high they score.
+    const reviewCount = (c.low_confidence || 0) + (c.full_image || 0);
     el.innerHTML = '<div class="scan-result-header">Scan result</div>' +
       '<div class="poll-stats" style="margin-top:6px;">' +
       stat('Tagged', c.added, 'nonzero-good') +
       stat('Low conf.', c.low_confidence, 'nonzero-warn') +
+      stat('Full photo', c.full_image || 0, 'nonzero-warn') +
       stat('Other', c.unknown, '') +
-      stat('No animal', c.no_animal || 0, '') +
       stat('Out of range', c.out_of_range, '') +
       stat('Already tagged', c.already_tagged, '') +
       (c.failed > 0 ? stat('Failed', c.failed, 'nonzero-bad') : '') +
       (c.no_thumb > 0 ? stat('No thumb', c.no_thumb, 'nonzero-warn') : '') +
       '</div>' +
-      (c.low_confidence > 0 ? `<button class="btn" style="font-size:11px;margin-top:8px;width:100%;" onclick="viewScanLowConf()">Review ${c.low_confidence} low confidence</button>` : '');
+      (reviewCount > 0 ? `<button class="btn" style="font-size:11px;margin-top:8px;width:100%;" onclick="viewScanLowConf()">Review ${reviewCount} for tagging</button>` : '');
   }
 }
 
@@ -652,7 +662,7 @@ async function viewScanLowConf() {
   selectedCrops.clear(); lastClickedKey = null;
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
-  grid.innerHTML = '<div class="loading" style="grid-column:1/-1">Loading low confidence results…</div>';
+  grid.innerHTML = '<div class="loading" style="grid-column:1/-1">Loading results to review…</div>';
   label.textContent = 'Loading…';
   const scanPetBtns = document.getElementById('scanPetBtns');
   scanPetBtns.innerHTML = pets.map(p => `<button class="btn btn-primary" title="Clear, close-up shot, your pet is the only subject.">${p.name}</button>`).join('');
@@ -661,11 +671,11 @@ async function viewScanLowConf() {
   try {
     const d = await api('/api/scan/low-confidence');
     if (!d.assets.length) {
-      label.textContent = 'No low confidence results';
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1; height:200px;"><div class="empty-sub">All results were confident or unknown</div></div>';
+      label.textContent = 'Nothing to review';
+      grid.innerHTML = '<div class="empty" style="grid-column:1/-1; height:200px;"><div class="empty-sub">Every match was either tagged or rejected outright</div></div>';
       return;
     }
-    label.textContent = `${d.assets.length} low confidence result${d.assets.length !== 1 ? 's' : ''}`;
+    label.textContent = `${d.assets.length} result${d.assets.length !== 1 ? 's' : ''} to review`;
     const thr = d.threshold ?? 0.8;
     const negSet = new Set(negIds);
     grid.innerHTML = d.assets.flatMap(a => renderPhotoItems(a, thr)).join('');

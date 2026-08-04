@@ -931,8 +931,15 @@ async def get_scan_result():
     if not result:
         return {"status": "none"}
     skipped = set(data.load_skipped_ids(DATA_DIR)) | set(data.load_negative_ids(DATA_DIR))
-    filtered_count = len({a["asset_id"] for a in (state.scan_low_conf_assets or []) if a["asset_id"] not in skipped})
-    counts = {**result.get("counts", {}), "low_confidence": filtered_count}
+    # Both stats count distinct assets still in the review queue. An asset is
+    # either whole-image (YOLO found nothing, so it has exactly one entry and no
+    # bbox) or detection-backed, never both, so the two never overlap.
+    pending = [a for a in (state.scan_low_conf_assets or []) if a["asset_id"] not in skipped]
+    counts = {
+        **result.get("counts", {}),
+        "low_confidence": len({a["asset_id"] for a in pending if not a.get("full_image")}),
+        "full_image": len({a["asset_id"] for a in pending if a.get("full_image")}),
+    }
     return {**result, "counts": counts}
 
 
@@ -954,6 +961,7 @@ async def get_scan_low_confidence():
         bbox = a.get("bbox")
         thumb = f"/api/crop/{aid}?bbox={','.join(str(v) for v in bbox)}" if bbox else f"/api/crop/{aid}"
         return {"id": aid, "thumb": thumb, "bbox": bbox,
+                "full_image": bool(a.get("full_image")),
                 "pet_name": a["pet_name"], "score": a["prob"], "date": a.get("date", "")}
 
     return {

@@ -27,7 +27,7 @@ def test_advance_ms_result_excludes_source_asset():
 
 
 # ---------------------------------------------------------------------------
-# process_asset: no-animal handling
+# process_asset: whole-image (no YOLO detection) handling
 #
 # process_asset is a closure inside _run_poll_cycle, so these drive a whole
 # one-asset poll cycle with everything around it stubbed out.
@@ -91,50 +91,64 @@ def cycle(monkeypatch, tmp_path):
     return run
 
 
-def test_no_yolo_detection_is_not_classified(cycle):
-    """A photo with no detected animal must not be classified at all: the classifier
-    always returns a best-matching class, so on an animal-free photo that match is
-    noise, and it used to be tagged as a real hit."""
-    counts, rec = cycle(detected=[])
+def test_whole_image_match_is_never_auto_tagged(monkeypatch, cycle):
+    """The core rule: with no YOLO detection the embedding describes the whole
+    scene, so however confidently it scores it goes to review instead of being
+    tagged. Previously a 0.99 here was written straight to Immich as a face."""
+    monkeypatch.setattr(poller, "THRESHOLD", 0.8)
+    low_conf = []
+    counts, rec = cycle(detected=[], prob=0.99, low_conf_out=low_conf)
     assert rec.faces == []
-    assert rec.embedded == 0
-    assert counts["no_animal"] == 1
     assert counts["added"] == 0
+    assert counts["full_image"] == 1
+    assert counts["low_confidence"] == 0
 
 
-def test_no_yolo_detection_caches_empty_result(cycle):
-    """Skipping must still record 'no animal here' so later passes don't re-run YOLO."""
-    _, rec = cycle(detected=[])
+def test_whole_image_match_is_queued_for_review_with_a_flag(monkeypatch, cycle):
+    """It must still reach the queue -- the recall these matches provide is the
+    whole point of keeping the fallback -- carrying the flag the UI needs to warn
+    that accepting it as a reference trains the classifier on the background."""
+    monkeypatch.setattr(poller, "THRESHOLD", 0.8)
+    low_conf = []
+    cycle(detected=[], prob=0.99, low_conf_out=low_conf)
+    assert low_conf == [{"asset_id": "asset-1", "pet_name": "Rex", "prob": 0.99,
+                         "date": "2026-07-26", "bbox": None, "full_image": True}]
+
+
+def test_whole_image_match_below_threshold_counts_as_low_confidence(monkeypatch, cycle):
+    """full_image is reserved for matches that would otherwise have been tagged,
+    so the stat reads as 'this many auto-tags were withheld'."""
+    monkeypatch.setattr(poller, "THRESHOLD", 0.8)
+    low_conf = []
+    counts, _ = cycle(detected=[], prob=0.5, low_conf_out=low_conf)
+    assert counts["low_confidence"] == 1
+    assert counts["full_image"] == 0
+    assert low_conf[0]["full_image"] is True
+
+
+def test_whole_image_crop_is_not_cached(cycle):
+    """Only real animal crops go in the crop cache; an empty list marks the asset
+    as having no detectable animal so later passes skip it."""
+    _, rec = cycle(detected=[], prob=0.99)
     assert rec.stored_crops == [("asset-1", [])]
 
 
 def test_detected_animal_is_still_tagged(cycle):
-    """The skip must not touch the normal path: a real detection still gets a face,
-    with the detected bbox and the real image size."""
+    """A real detection is unaffected: it still gets a face, with the detected
+    bbox and the real image size."""
     counts, rec = cycle(detected=[((0.1, 0.2, 0.5, 0.6), object())])
     assert counts["added"] == 1
-    assert counts["no_animal"] == 0
+    assert counts["full_image"] == 0
     assert rec.faces == [("asset-1", "person-1", (0.1, 0.2, 0.5, 0.6), (100, 100))]
 
 
-def test_low_confidence_entry_keeps_bbox(monkeypatch, cycle):
-    """Low-confidence review entries always carry the detected bbox now that a
-    bbox-less (whole-image) crop can no longer reach the classifier."""
+def test_detected_low_confidence_entry_keeps_bbox(monkeypatch, cycle):
+    """A detection-backed review entry carries its bbox and is not flagged, so the
+    review UI crops to the animal instead of showing the whole photo."""
     monkeypatch.setattr(poller, "THRESHOLD", 0.8)
     low_conf = []
     counts, _ = cycle(detected=[((0.1, 0.2, 0.5, 0.6), object())], prob=0.5, low_conf_out=low_conf)
     assert counts["low_confidence"] == 1
     assert low_conf == [{"asset_id": "asset-1", "pet_name": "Rex", "prob": 0.5,
-                         "date": "2026-07-26", "bbox": [0.1, 0.2, 0.5, 0.6]}]
-
-
-def test_no_yolo_detection_produces_no_low_confidence_entry(monkeypatch, cycle):
-    """The old whole-image fallback also polluted the review queue with animal-free
-    photos, which got accepted as whole-image refs and fed the next round of
-    false positives. Nothing without a detection should reach the queue now."""
-    monkeypatch.setattr(poller, "THRESHOLD", 0.8)
-    low_conf = []
-    counts, _ = cycle(detected=[], prob=0.5, low_conf_out=low_conf)
-    assert low_conf == []
-    assert counts["low_confidence"] == 0
-    assert counts["no_animal"] == 1
+                         "date": "2026-07-26", "bbox": [0.1, 0.2, 0.5, 0.6],
+                         "full_image": False}]

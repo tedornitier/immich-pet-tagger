@@ -17,6 +17,12 @@ YOLO_BATCH_SIZE = int(os.environ.get("YOLO_BATCH_SIZE", 32))
 YOLO_WORKERS = int(os.environ.get("GPU_WORKERS", 2))
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", 640))
 YOLO_MODEL_NAME = os.environ.get("YOLO_MODEL_NAME", "yolov8n.pt")
+# Ultralytics defaults this to 0.25, which is tuned for "is this detection
+# trustworthy on its own". Here a detection only has to be good enough to crop
+# on -- CLIP and the classifier decide what the animal actually is -- so a low
+# threshold is wanted. At 0.25, pets that are small in frame, turned away,
+# occluded, blurred or in low light are missed entirely.
+YOLO_CONF = float(os.environ.get("YOLO_CONF", 0.10))
 
 ANIMAL_CLASS_IDS = {
     14,  # bird
@@ -103,7 +109,7 @@ def _yolo_batch_loop(worker_id: int) -> None:
             # Tensors are already preprocessed by caller threads: B×C×H×W, float32, [0,1], RGB.
             # Ultralytics skips PIL/numpy conversion when given a tensor directly.
             stacked = torch.stack([req.tensor for req in batch])
-            results_list = model(stacked, verbose=False, imgsz=YOLO_INPUT_SIZE)
+            results_list = model(stacked, verbose=False, imgsz=YOLO_INPUT_SIZE, conf=YOLO_CONF)
             for req, result in zip(batch, results_list):
                 boxes = []
                 for box in result.boxes:
