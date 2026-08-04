@@ -105,7 +105,7 @@ def run_poll_cycle(data_dir: str, on_date=None, cancel=None, low_conf_out=None, 
     data.write_poll_status(dd, {"status": "running", "started_at": now})
 
     counts = live_counts if live_counts is not None else {}
-    for k in ("added", "low_confidence", "unknown", "out_of_range", "already_tagged", "failed", "no_thumb"):
+    for k in ("added", "low_confidence", "unknown", "no_animal", "out_of_range", "already_tagged", "failed", "no_thumb"):
         counts[k] = 0
     try:
         _run_poll_cycle(dd, counts, on_date, cancel, low_conf_out, manual, scan_until, scan_since)
@@ -179,17 +179,24 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
             return
         detected = emb.crop_animals(img)
         if not detected:
-            crops = [(None, img)]
-        else:
-            crops = detected
-            if len(detected) > 1:
-                log.info(f"YOLO detected {len(detected)} animals in {aid} ({time_str[:10]})")
+            # No animal detected by YOLO: skip the asset rather than falling back
+            # to classifying the whole image. The classifier always returns its
+            # best-matching class regardless of what the image contains, so on a
+            # photo with no animal in it that best match is noise -- which is
+            # where the bulk of false positives came from. Still cache the empty
+            # result so later passes don't re-run YOLO on this asset.
+            emb.store_crops(aid, [])
+            with _count_lock:
+                counts["no_animal"] += 1
+            return
+        crops = detected
+        if len(detected) > 1:
+            log.info(f"YOLO detected {len(detected)} animals in {aid} ({time_str[:10]})")
         vecs = [(bbox_norm, emb.embed_image(crop)) for bbox_norm, crop in crops]
 
         # Populate the crop cache so borderline and suggestions can reuse this
-        # work without re-fetching and re-embedding. Only real animal crops are
-        # stored; an empty list marks "no animal detected".
-        emb.store_crops(aid, [(b, v) for b, v in vecs if b is not None and v is not None])
+        # work without re-fetching and re-embedding.
+        emb.store_crops(aid, [(b, v) for b, v in vecs if v is not None])
 
         existing_persons: set | None = None
         tagged_in_photo: set[str] = set()
@@ -209,7 +216,7 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
                 with _count_lock:
                     counts["low_confidence"] += 1
                 if low_conf_out is not None:
-                    low_conf_out.append({"asset_id": aid, "pet_name": pet_name, "prob": prob, "date": time_str[:10], "bbox": list(bbox_norm) if bbox_norm is not None else None})
+                    low_conf_out.append({"asset_id": aid, "pet_name": pet_name, "prob": prob, "date": time_str[:10], "bbox": list(bbox_norm)})
                 continue
 
             cfg = config.get(pet_name, {})
@@ -238,7 +245,7 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
 
             log.info(f"{imm.IMMICH_URL}/search/photos/{aid} -> {pet_name} ({prob:.3f}) | {time_str[:10]}")
 
-            face_id = imm.post_face_sync(aid, person_id, bbox_norm, img.size if bbox_norm is not None else None)
+            face_id = imm.post_face_sync(aid, person_id, bbox_norm, img.size)
             tagged_in_photo.add(person_id)
             with _count_lock:
                 if face_id:

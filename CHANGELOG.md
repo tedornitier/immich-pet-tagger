@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- **Photos with no animal in them are no longer classified**, which was the largest source of false positives. When YOLO detected nothing, scans fell back to embedding and classifying the whole image; since the classifier always returns its best-matching class regardless of image content, that best match on an animal-free photo is noise, and anything scoring above the threshold got tagged as a real hit. Such photos are now skipped outright and counted under a new "No animal" scan stat. This also keeps the low-confidence review queue clear of animal-free photos, which previously got accepted as whole-image references and trained the classifier to match on scene and context — feeding the next round of false positives.
+
 ### Features
 - **Review tag**: setting `PET_REVIEW_TAG` makes the tagger apply that Immich tag to a photo every time it writes a face to it, giving you a single place in Immich to review everything it touched. The tag is created on first use, and applied inline with each face rather than batched, so a photo appears under the tag as soon as it is tagged. Requires `tag.create` and `tag.asset` on the API key.
 

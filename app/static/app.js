@@ -636,6 +636,7 @@ function showScanResult(r) {
       stat('Tagged', c.added, 'nonzero-good') +
       stat('Low conf.', c.low_confidence, 'nonzero-warn') +
       stat('Other', c.unknown, '') +
+      stat('No animal', c.no_animal || 0, '') +
       stat('Out of range', c.out_of_range, '') +
       stat('Already tagged', c.already_tagged, '') +
       (c.failed > 0 ? stat('Failed', c.failed, 'nonzero-bad') : '') +
