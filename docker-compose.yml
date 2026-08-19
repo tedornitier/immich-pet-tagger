@@ -20,6 +20,7 @@ services:
       - YOLO_INPUT_SIZE=640
       - THRESHOLD=0.8
       - THRESHOLD_FALLBACK=0.85
+      # - WHOLE_IMAGE_MATCH=review                # tag (default) | review | ignore: what a whole-image match may do
       - YOLO_CONF=0.2
     # Uncomment the section below to enable NVIDIA GPU acceleration.
     # Requires nvidia-container-toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html

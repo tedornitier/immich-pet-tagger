@@ -58,6 +58,7 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .score-badge { position: absolute; bottom: 4px; left: 4px; width: 30px; height: 30px; border-radius: 50%; background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700; color: #fff; pointer-events: none; }
 .score-badge.score-low { color: var(--danger); }
 .score-badge.score-ok { color: var(--success); }
+.full-image-badge { position: absolute; top: 4px; left: 4px; padding: 1px 5px; border-radius: 3px; background: rgba(0,0,0,0.6); backdrop-filter: blur(2px); font-size: 8px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; color: #c9954a; pointer-events: none; }
 .refs-panel { width: 396px; min-width: 396px; border-left: 0.5px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
 .suggest-section { padding: 12px 14px; border-bottom: 0.5px solid var(--border); flex-shrink: 0; }
 .suggest-section .btn { justify-content: center; }

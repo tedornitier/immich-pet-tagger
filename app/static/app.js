@@ -194,8 +194,12 @@ function renderPhotoItems(a, thr) {
   const badge = a.score != null
     ? `<div class="score-badge ${a.score < thr ? 'score-low' : 'score-ok'}">${Math.round(a.score * 100)}%</div>`
     : '';
+  // Whole photo, no animal detected. Flagged because accepting one as a reference
+  // teaches the classifier to match on the background rather than on the pet.
+  const fullImageBadge = a.full_image ? '<div class="full-image-badge">Whole photo</div>' : '';
   const title = a.pet_name
-    ? `${fmtDate(a.date)} · ${Math.round(a.score * 100)}% ${a.pet_name}`
+    ? `${fmtDate(a.date)} · ${Math.round(a.score * 100)}% ${a.pet_name}` +
+      (a.full_image ? ' · whole photo, no animal detected' : '')
     : `${a.filename || ''} · ${fmtDate(a.date)}`;
   const makeItem = (key, src, cropIdx, bbox) => {
     const cropIdxAttr = cropIdx != null ? `data-crop-idx="${cropIdx}"` : '';
@@ -206,6 +210,7 @@ function renderPhotoItems(a, thr) {
       <a class="photo-open" href="${immichUrl}/photos/${a.id}" target="_blank" rel="noopener" onclick="event.stopPropagation()">⤢</a>
       <div class="photo-check">✓</div>
       ${badge}
+      ${fullImageBadge}
     </div>`;
   };
   if (a.crops && a.crops.length > 0) {
@@ -620,6 +625,8 @@ function showScanResult(r) {
       '<div class="poll-stats" style="margin-top:6px;">' +
       stat('Tagged', c.added || 0, 'nonzero-good') +
       stat('Low conf.', c.low_confidence || 0, 'nonzero-warn') +
+      (c.whole_image_review > 0 ? stat('Whole photo', c.whole_image_review, 'nonzero-warn') : '') +
+      (c.whole_image_ignored > 0 ? stat('Whole photo', c.whole_image_ignored, '') : '') +
       stat('Other', c.unknown || 0, '') +
       stat('Already tagged', c.already_tagged || 0, '') +
       (c.failed > 0 ? stat('Failed', c.failed, 'nonzero-bad') : '') +
@@ -637,17 +644,24 @@ function showScanResult(r) {
   }
   if (r.counts) {
     const c = r.counts;
+    // Both buckets share the review queue: genuinely low-confidence matches, and
+    // whole-photo matches withheld from tagging by WHOLE_IMAGE_MATCH=review.
+    const reviewCount = (c.low_confidence || 0) + (c.whole_image_review || 0);
     el.innerHTML = '<div class="scan-result-header">Scan result</div>' +
       '<div class="poll-stats" style="margin-top:6px;">' +
       stat('Tagged', c.added, 'nonzero-good') +
       stat('Low conf.', c.low_confidence, 'nonzero-warn') +
+      // Only meaningful under WHOLE_IMAGE_MATCH=review/ignore, so hidden on the
+      // default 'tag' setting where both are always zero.
+      (c.whole_image_review > 0 ? stat('Whole photo', c.whole_image_review, 'nonzero-warn') : '') +
+      (c.whole_image_ignored > 0 ? stat('Whole photo', c.whole_image_ignored, '') : '') +
       stat('Other', c.unknown, '') +
       stat('Out of range', c.out_of_range, '') +
       stat('Already tagged', c.already_tagged, '') +
       (c.failed > 0 ? stat('Failed', c.failed, 'nonzero-bad') : '') +
       (c.no_thumb > 0 ? stat('No thumb', c.no_thumb, 'nonzero-warn') : '') +
       '</div>' +
-      (c.low_confidence > 0 ? `<button class="btn" style="font-size:11px;margin-top:8px;width:100%;" onclick="viewScanLowConf()">Review ${c.low_confidence} low confidence</button>` : '');
+      (reviewCount > 0 ? `<button class="btn" style="font-size:11px;margin-top:8px;width:100%;" onclick="viewScanLowConf()">Review ${reviewCount}</button>` : '');
   }
 }
 
