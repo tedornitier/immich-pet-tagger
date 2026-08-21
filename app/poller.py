@@ -25,6 +25,35 @@ before this existed. The tagging accuracy tool has consistently measured the fal
 path as a meaningfully noisier signal than a real crop (see .claude/decisions.md), this
 lets that be corrected for in live tagging, not just observed in the diagnostic."""
 
+WHOLE_IMAGE_MODES = ("tag", "review", "ignore")
+
+
+def parse_whole_image_match(value: str | None) -> str:
+    """Normalize WHOLE_IMAGE_MATCH, falling back to 'tag' on anything unrecognized.
+    A typo here must not silently stop the tagger tagging, so an unusable value warns
+    loudly and keeps prior behavior rather than picking a stricter mode."""
+    mode = (value or "").strip().lower()
+    if not mode:
+        return "tag"
+    if mode not in WHOLE_IMAGE_MODES:
+        log.warning(f"WHOLE_IMAGE_MATCH={value!r} is not one of {WHOLE_IMAGE_MODES}, using 'tag'.")
+        return "tag"
+    return mode
+
+
+WHOLE_IMAGE_MATCH = parse_whole_image_match(os.environ.get("WHOLE_IMAGE_MATCH"))
+"""What a whole-image fallback match is allowed to do. THRESHOLD_FALLBACK tunes *how
+confident* such a match must be; this decides what happens once it clears that bar:
+
+  tag     Tag it, exactly like a match backed by a real detection (default, prior behavior).
+  review  Never tag it. Send it to the low-confidence review queue instead, however high it
+          scores, and let a human decide. For libraries where the fallback finds real pets
+          often enough to be worth keeping, but not reliably enough to trust unattended.
+  ignore  Drop it. The whole-image fallback is disabled entirely and such photos are not
+          even embedded, which also makes scans cheaper on libraries that are mostly
+          animal-free.
+"""
+
 _count_lock = threading.Lock()
 
 
@@ -60,17 +89,28 @@ def asset_in_range(time_str: str, since: str | None, until: str | None) -> bool:
     return True
 
 
-def classify_outcome(pet_name: str, prob: float, time_str: str, cfg: dict, threshold: float = THRESHOLD) -> str:
+def classify_outcome(pet_name: str, prob: float, time_str: str, cfg: dict, threshold: float = THRESHOLD,
+                     full_image: bool = False, whole_image_match: str | None = None) -> str:
     """Decide what a single crop's classification means, before any Immich calls.
     Date range is checked before confidence: a low-confidence guess for a pet who
     was not even in range on that date must not surface in the low-confidence
-    review queue, it should be dropped outright like an out-of-range confident match is."""
+    review queue, it should be dropped outright like an out-of-range confident match is.
+
+    full_image marks a crop that is the whole photo because YOLO found no animal to
+    crop; WHOLE_IMAGE_MATCH then decides whether such a match may tag (see above)."""
+    mode = whole_image_match if whole_image_match is not None else WHOLE_IMAGE_MATCH
     if pet_name == "unknown":
         return "unknown"
     if not asset_in_range(time_str, cfg.get("since"), cfg.get("until")):
         return "out_of_range"
+    # Checked before confidence: in ignore mode a whole-image match is dropped whether
+    # it was confident or not, so it never reaches the review queue either.
+    if full_image and mode == "ignore":
+        return "whole_image_ignored"
     if prob < threshold:
         return "low_confidence"
+    if full_image and mode == "review":
+        return "whole_image_review"
     return "confident"
 
 
@@ -121,12 +161,14 @@ def migrate_ref_bboxes(data_dir: Path) -> None:
 
 def run_poll_cycle(data_dir: str, on_date=None, cancel=None, low_conf_out=None, live_counts: dict | None = None, manual: bool = False, scan_until: str | None = None, scan_since: str | None = None) -> None:
     dd = Path(data_dir)
-    log.info(f"Poll cycle | threshold={THRESHOLD} threshold_fallback={THRESHOLD_FALLBACK} yolo_conf={det.YOLO_CONF} manual={manual}")
+    log.info(f"Poll cycle | threshold={THRESHOLD} threshold_fallback={THRESHOLD_FALLBACK} "
+             f"whole_image_match={WHOLE_IMAGE_MATCH} yolo_conf={det.YOLO_CONF} manual={manual}")
     now = datetime.now(timezone.utc).isoformat()
     data.write_poll_status(dd, {"status": "running", "started_at": now})
 
     counts = live_counts if live_counts is not None else {}
-    for k in ("added", "low_confidence", "unknown", "out_of_range", "already_tagged", "failed", "no_thumb"):
+    for k in ("added", "low_confidence", "whole_image_review", "whole_image_ignored",
+              "unknown", "out_of_range", "already_tagged", "failed", "no_thumb"):
         counts[k] = 0
     try:
         _run_poll_cycle(dd, counts, on_date, cancel, low_conf_out, manual, scan_until, scan_since)
@@ -192,6 +234,7 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
     latest_ts = max((cursor_ts for _, cursor_ts, _ in assets), default=last_ts)
     threshold = THRESHOLD
     threshold_fallback = THRESHOLD_FALLBACK
+    whole_image_match = WHOLE_IMAGE_MATCH
     yolo_conf = det.YOLO_CONF
 
     def process_asset(aid: str, time_str: str) -> None:
@@ -208,6 +251,15 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
             return
         detected = emb.crop_animals(img, conf=yolo_conf)
         if not detected:
+            if whole_image_match == "ignore":
+                # classify_outcome would return whole_image_ignored for every crop
+                # below anyway; returning here just avoids paying for the CLIP
+                # embedding first. Still cache the empty detection result so later
+                # passes don't re-run YOLO on this asset.
+                emb.store_crops(aid, [])
+                with _count_lock:
+                    counts["whole_image_ignored"] += 1
+                return
             crops = [(None, img)]
         else:
             crops = detected
@@ -229,8 +281,10 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
 
             pet_name, prob = clf_mod.classify(vec, names, clf, scaler)
             cfg = config.get(pet_name, {})
-            th = threshold if bbox_norm is not None else threshold_fallback
-            outcome = classify_outcome(pet_name, prob, time_str, cfg, threshold=th)
+            full_image = bbox_norm is None
+            th = threshold_fallback if full_image else threshold
+            outcome = classify_outcome(pet_name, prob, time_str, cfg, threshold=th,
+                                       full_image=full_image, whole_image_match=whole_image_match)
 
             if outcome == "unknown":
                 with _count_lock:
@@ -242,11 +296,23 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
                     counts["out_of_range"] += 1
                 continue
 
-            if outcome == "low_confidence":
+            if outcome == "whole_image_ignored":
                 with _count_lock:
-                    counts["low_confidence"] += 1
+                    counts["whole_image_ignored"] += 1
+                continue
+
+            # whole_image_review is a confident match that WHOLE_IMAGE_MATCH held back
+            # from tagging. It joins the same review queue as a genuinely low-confidence
+            # match, but is counted apart so the stat reads as "auto-tags withheld"
+            # rather than inflating the low-confidence number.
+            if outcome in ("low_confidence", "whole_image_review"):
+                with _count_lock:
+                    counts[outcome] += 1
                 if low_conf_out is not None:
-                    low_conf_out.append({"asset_id": aid, "pet_name": pet_name, "prob": prob, "date": time_str[:10], "bbox": list(bbox_norm) if bbox_norm is not None else None})
+                    low_conf_out.append({"asset_id": aid, "pet_name": pet_name, "prob": prob,
+                                         "date": time_str[:10],
+                                         "bbox": None if full_image else list(bbox_norm),
+                                         "outcome": outcome})
                 continue
 
             person_id = cfg.get("person_id")

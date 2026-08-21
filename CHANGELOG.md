@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Features
+- `WHOLE_IMAGE_MATCH` env var decides what a whole-image fallback match (YOLO found no animal to crop) may do once it clears `THRESHOLD_FALLBACK`. Where `THRESHOLD_FALLBACK` tunes *how confident* such a match must be, this decides what happens when it is: `tag` (default) tags it like any other match, exactly as before; `review` never tags it and routes it to the low-confidence review queue instead, however high it scores, keeping the fallback's extra recall while putting a human in the loop; `ignore` disables the fallback entirely, skipping such photos before they are even embedded, which also cuts scan cost on largely animal-free libraries. Whole-image entries in the review queue are marked "Whole photo", since accepting one as a reference teaches the classifier to match on background rather than on the pet. Scan stats gain a "Whole photo" count, shown only when the setting is not `tag`.
+
 ## v1.7.5
 
 ### Fixed

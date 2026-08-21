@@ -1182,8 +1182,15 @@ async def get_scan_result():
     if not result:
         return {"status": "none"}
     skipped = set(data.load_skipped_ids(DATA_DIR)) | set(data.load_negative_ids(DATA_DIR))
-    filtered_count = len({a["asset_id"] for a in (state.scan_low_conf_assets or []) if a["asset_id"] not in skipped})
-    counts = {**result.get("counts", {}), "low_confidence": filtered_count}
+    # Recounted rather than taken from the scan, since assets can be marked skipped or
+    # negative after the fact. Whole-image matches held back by WHOLE_IMAGE_MATCH=review
+    # share the queue but are counted apart, so "Low conf." keeps meaning what it did.
+    pending = [a for a in (state.scan_low_conf_assets or []) if a["asset_id"] not in skipped]
+    counts = {
+        **result.get("counts", {}),
+        "low_confidence": len({a["asset_id"] for a in pending if a.get("outcome") != "whole_image_review"}),
+        "whole_image_review": len({a["asset_id"] for a in pending if a.get("outcome") == "whole_image_review"}),
+    }
     return {**result, "counts": counts}
 
 
@@ -1204,7 +1211,10 @@ async def get_scan_low_confidence():
         aid = a["asset_id"]
         bbox = a.get("bbox")
         thumb = f"/api/crop/{aid}?bbox={','.join(str(v) for v in bbox)}" if bbox else f"/api/crop/{aid}"
-        return {"id": aid, "thumb": thumb, "bbox": bbox,
+        # No bbox in this queue means YOLO found nothing and the match came from the
+        # whole photo. Worth flagging in the grid: accepting one as a reference teaches
+        # the classifier to match on the background instead of on the pet.
+        return {"id": aid, "thumb": thumb, "bbox": bbox, "full_image": bbox is None,
                 "pet_name": a["pet_name"], "score": a["prob"], "date": a.get("date", "")}
 
     return {
