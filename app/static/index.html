@@ -215,8 +215,9 @@
   <div class="modal">
     <h2 id="addByIdTitle">Add by ID or link</h2>
     <div class="field">
-      <label>Immich photo link or asset ID</label>
+      <label id="addByIdLabel">Immich photo link or asset ID</label>
       <input type="text" id="addByIdInput" placeholder="immich:2283/photos/{UUID} or a bare ID" onkeydown="if(event.key==='Enter') submitAddById()">
+      <textarea id="addByIdTextarea" rows="6" placeholder="One link or ID per line" style="display:none; width:100%; background:var(--bg3); border:0.5px solid var(--border); border-radius:var(--radius-sm); color:var(--text); font-size:13px; padding:7px 10px; outline:none; resize:vertical; font-family:inherit;"></textarea>
       <div class="hint" id="addByIdHint"></div>
     </div>
     <div class="modal-error" id="addByIdError"></div>

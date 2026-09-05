@@ -356,6 +356,40 @@ async def add_negatives(body: PetAssets):
     return {"ok": True, "count": len(merged)}
 
 
+@router.post("/negatives/batch")
+async def add_negatives_batch(body: PetAssets):
+    """Validate and add multiple asset IDs as negatives, loading YOLO/CLIP once
+    for the whole batch instead of once per asset like the single-add path."""
+    ids = list(dict.fromkeys(body.asset_ids))  # de-dupe, preserve order
+
+    async def asset_exists(asset_id: str) -> bool:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}", headers=imm.headers())
+        return resp.status_code == 200
+
+    exists_flags = await asyncio.gather(*(asset_exists(aid) for aid in ids))
+    valid_ids = [aid for aid, ok in zip(ids, exists_flags) if ok]
+    invalid_ids = [aid for aid, ok in zip(ids, exists_flags) if not ok]
+
+    def warm_cache():
+        with inference_session():
+            for aid in valid_ids:
+                try:
+                    emb.get_crops_and_embed(aid)
+                except Exception as e:
+                    log.warning(f"Could not embed asset {aid} for negatives batch: {e}")
+
+    if valid_ids:
+        await asyncio.to_thread(warm_cache)
+
+    existing = set(data.load_negative_ids(DATA_DIR))
+    merged = list(existing | set(valid_ids))
+    data.save_negative_ids(merged, DATA_DIR)
+    added = len(set(valid_ids) - existing)
+    log.info(f"Negatives batch: {len(merged)} total (+{added} new, {len(invalid_ids)} invalid)")
+    return {"ok": True, "count": len(merged), "added": added, "invalid_ids": invalid_ids}
+
+
 @router.delete("/pets/{name}/refs")
 async def clear_pet_refs(name: str):
     config = data.load_config(DATA_DIR)

@@ -265,17 +265,26 @@ function parseAssetId(input) {
 function _openAddByIdModal(mode) {
   _addByIdMode = mode;
   document.getElementById('addByIdInput').value = '';
+  document.getElementById('addByIdTextarea').value = '';
   clearModalError('addByIdError');
   const example = 'e.g. a1b2c3d4-11aa-22bb-33cc-4d5e6f7a8b9c';
+  const singleInput = document.getElementById('addByIdInput');
+  const multiInput = document.getElementById('addByIdTextarea');
   if (mode === 'neg') {
     document.getElementById('addByIdTitle').textContent = 'Add "not a pet" by ID or link';
-    document.getElementById('addByIdHint').textContent = `Paste an Immich photo URL or just the asset ID (${example}). It will be added directly to "not a pet".`;
+    document.getElementById('addByIdLabel').textContent = 'Immich photo links or asset IDs, one per line';
+    document.getElementById('addByIdHint').textContent = `Paste one or more Immich photo URLs or asset IDs, one per line (${example}). They'll be added directly to "not a pet".`;
+    singleInput.style.display = 'none';
+    multiInput.style.display = 'block';
   } else {
     document.getElementById('addByIdTitle').textContent = 'Add reference by ID or link';
+    document.getElementById('addByIdLabel').textContent = 'Immich photo link or asset ID';
     document.getElementById('addByIdHint').textContent = `Paste an Immich photo URL or just the asset ID (${example}). If one animal is detected it is added immediately; multiple crops let you pick the right one.`;
+    singleInput.style.display = 'block';
+    multiInput.style.display = 'none';
   }
   document.getElementById('addByIdModal').classList.add('open');
-  setTimeout(() => document.getElementById('addByIdInput').focus(), 100);
+  setTimeout(() => (mode === 'neg' ? multiInput : singleInput).focus(), 100);
 }
 
 function openAddById() { if (activePet) _openAddByIdModal('ref'); }
@@ -288,18 +297,22 @@ function closeAddById() {
 
 async function submitAddById() {
   clearModalError('addByIdError');
-  const id = parseAssetId(document.getElementById('addByIdInput').value);
-  if (!id) { modalError('addByIdError', 'Could not find an asset ID. Paste an Immich photo link or the bare ID.'); return; }
 
   if (_addByIdMode === 'neg') {
+    const lines = document.getElementById('addByIdTextarea').value.split('\n').map(l => l.trim()).filter(Boolean);
+    const ids = [...new Set(lines.map(parseAssetId).filter(Boolean))];
+    if (ids.length === 0) { modalError('addByIdError', 'Could not find any asset IDs. Paste Immich photo links or IDs, one per line.'); return; }
     try {
-      await api(`/api/asset/${id}/crops`); // validates asset exists
-      await api('/api/negatives', { method: 'POST', body: { asset_ids: [id] } });
+      const result = await api('/api/negatives/batch', { method: 'POST', body: { asset_ids: ids } });
       closeAddById();
       await loadNegatives();
-      toast('Added to "not a pet"', 'success');
+      const invalidCount = (result.invalid_ids || []).length;
+      const msg = invalidCount > 0
+        ? `Added ${result.added} to "not a pet" (${invalidCount} not found)`
+        : `Added ${result.added} to "not a pet"`;
+      toast(msg, invalidCount > 0 ? 'warn' : 'success');
     } catch(e) {
-      let msg = e.message || 'Could not load asset';
+      let msg = e.message || 'Could not load assets';
       try { const j = JSON.parse(msg); if (j.detail) msg = j.detail; } catch(_) {}
       modalError('addByIdError', msg);
     }
@@ -307,6 +320,8 @@ async function submitAddById() {
   }
 
   // ref mode
+  const id = parseAssetId(document.getElementById('addByIdInput').value);
+  if (!id) { modalError('addByIdError', 'Could not find an asset ID. Paste an Immich photo link or the bare ID.'); return; }
   if (!activePet) return;
   const pet = activePet;
   try {
