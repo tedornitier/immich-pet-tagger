@@ -18,11 +18,12 @@ import torch
 from PIL import Image
 
 import immich as imm
+from device import is_gpu, pick_device, submit_lock
 
 log = logging.getLogger("embedder")
 
 GPU_WORKERS = int(os.environ.get("GPU_WORKERS", 2))
-_default_scan_workers = GPU_WORKERS * 32 if torch.cuda.is_available() else 8
+_default_scan_workers = GPU_WORKERS * 32 if is_gpu(pick_device()) else 8
 SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", _default_scan_workers))
 CLIP_BATCH_SIZE = int(os.environ.get("CLIP_BATCH_SIZE", 32))
 CLIP_MODEL_NAME = os.environ.get("CLIP_MODEL_NAME", "ViT-B-16")
@@ -97,11 +98,12 @@ def get_clip_error() -> str | None:
 
 def _clip_batch_loop(worker_id: int) -> None:
     global _clip_batch_total, _clip_batch_count, _clip_preprocess_fn, _clip_load_error
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = pick_device()
     log.info(f"CLIP worker {worker_id} loading on {device}...")
     try:
         model, preprocess, _ = open_clip.create_model_and_transforms(CLIP_MODEL_NAME, pretrained=CLIP_PRETRAINED)
-        model.eval().to(device)
+        with submit_lock(device):
+            model.eval().to(device)
     except Exception as e:
         _clip_load_error = str(e)
         log.error(
@@ -142,10 +144,11 @@ def _clip_batch_loop(worker_id: int) -> None:
                 stream.synchronize()
                 vecs = feats.cpu().numpy()
             else:
-                with torch.no_grad():
-                    feats = model.encode_image(stacked.to(device))
-                    feats = feats / feats.norm(dim=-1, keepdim=True)
-                vecs = feats.cpu().numpy()
+                with submit_lock(device):
+                    with torch.no_grad():
+                        feats = model.encode_image(stacked.to(device))
+                        feats = feats / feats.norm(dim=-1, keepdim=True)
+                    vecs = feats.cpu().numpy()
         except Exception as e:
             log.warning(f"CLIP worker {worker_id} batch error: {e}")
             vecs = [None] * len(batch)
