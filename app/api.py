@@ -110,11 +110,12 @@ async def get_config():
 
 @router.get("/settings")
 async def get_settings():
-    """Env-var-configured defaults (THRESHOLD, YOLO_CONF). Read-only: production config
-    lives in docker-compose.yml only. Used to prefill the benchmark tool's per-run
-    threshold overrides, which are never persisted, they only apply to that one run."""
-    from poller import THRESHOLD
-    return {"threshold": THRESHOLD, "yolo_conf": det.YOLO_CONF}
+    """Env-var-configured defaults (THRESHOLD, THRESHOLD_FALLBACK, YOLO_CONF). Read-only:
+    production config lives in docker-compose.yml only. Used to prefill the benchmark
+    tool's per-run threshold overrides, which are never persisted, they only apply to
+    that one run."""
+    from poller import THRESHOLD, THRESHOLD_FALLBACK
+    return {"threshold": THRESHOLD, "threshold_fallback": THRESHOLD_FALLBACK, "yolo_conf": det.YOLO_CONF}
 
 
 def _slim_asset(a: dict) -> dict:
