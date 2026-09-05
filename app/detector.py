@@ -11,6 +11,8 @@ import numpy as np
 import torch
 from PIL import Image
 
+from device import pick_device, submit_lock
+
 log = logging.getLogger("detector")
 
 YOLO_BATCH_SIZE = int(os.environ.get("YOLO_BATCH_SIZE", 32))
@@ -76,11 +78,12 @@ def get_yolo_error() -> str | None:
 def _yolo_batch_loop(worker_id: int) -> None:
     global yolo_batch_total, yolo_batch_count, _yolo_load_error
     from ultralytics import YOLO
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = pick_device()
     log.info(f"YOLO worker {worker_id} loading on {device}...")
     try:
         model = YOLO(YOLO_MODEL_NAME)
-        model.to(device)
+        with submit_lock(device):
+            model.to(device)
     except Exception as e:
         _yolo_load_error = str(e)
         log.error(
@@ -112,21 +115,22 @@ def _yolo_batch_loop(worker_id: int) -> None:
             # Tensors are already preprocessed by caller threads: B×C×H×W, float32, [0,1], RGB.
             # Ultralytics skips PIL/numpy conversion when given a tensor directly.
             stacked = torch.stack([req.tensor for req in batch])
-            results_list = model(stacked, verbose=False, imgsz=YOLO_INPUT_SIZE, conf=_MODEL_CONF_FLOOR, iou=IOU_THRESHOLD)
-            for req, result in zip(batch, results_list):
-                boxes = []
-                for box in result.boxes:
-                    cls = int(box.cls[0])
-                    if cls not in ANIMAL_CLASS_IDS:
-                        continue
-                    conf = float(box.conf[0])
-                    if conf < req.conf:
-                        continue
-                    x1, y1, x2, y2 = box.xyxyn[0].tolist()
-                    boxes.append((conf, x1, y1, x2, y2))
-                boxes.sort(reverse=True)
-                req.result = boxes  # (conf, x1, y1, x2, y2), highest confidence first
-                req.event.set()
+            with submit_lock(device):
+                results_list = model(stacked, verbose=False, imgsz=YOLO_INPUT_SIZE, conf=_MODEL_CONF_FLOOR, iou=IOU_THRESHOLD)
+                for req, result in zip(batch, results_list):
+                    boxes = []
+                    for box in result.boxes:
+                        cls = int(box.cls[0])
+                        if cls not in ANIMAL_CLASS_IDS:
+                            continue
+                        conf = float(box.conf[0])
+                        if conf < req.conf:
+                            continue
+                        x1, y1, x2, y2 = box.xyxyn[0].tolist()
+                        boxes.append((conf, x1, y1, x2, y2))
+                    boxes.sort(reverse=True)
+                    req.result = boxes  # (conf, x1, y1, x2, y2), highest confidence first
+                    req.event.set()
         except Exception as e:
             log.warning(f"YOLO worker {worker_id} batch error: {e}")
             for req in batch:
