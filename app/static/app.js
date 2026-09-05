@@ -14,6 +14,15 @@ function toast(msg, type = '') {
 
 function initials(name) { return name.slice(0, 2).toUpperCase(); }
 
+const TILE_SIZE_KEY = 'pet_tagger_tile_size', TILE_SIZE_MIN = 80, TILE_SIZE_MAX = 320;
+
+function changeTileSize(delta) {
+  const current = parseInt(localStorage.getItem(TILE_SIZE_KEY), 10) || 120;
+  const next = Math.min(TILE_SIZE_MAX, Math.max(TILE_SIZE_MIN, current + delta));
+  document.documentElement.style.setProperty('--tile-size', next + 'px');
+  localStorage.setItem(TILE_SIZE_KEY, next);
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -974,6 +983,8 @@ document.getElementById('importDetailModal').addEventListener('click', function(
 // ---------------------------------------------------------------------------
 
 (async () => {
+  const savedTileSize = parseInt(localStorage.getItem(TILE_SIZE_KEY), 10);
+  if (savedTileSize) document.documentElement.style.setProperty('--tile-size', savedTileSize + 'px');
   await refreshState();
   if (!activePet && pets.length > 0) showGuide();
   prefillScanUntil();
