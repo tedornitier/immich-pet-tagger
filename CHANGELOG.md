@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.8.0
+
+### Features
+- The "Not a pet" panel's "Add manually" dialog accepts several Immich photo links or asset IDs at once, one per line. They are validated against Immich in one batch and invalid ones are reported back, instead of adding photos one at a time.
+- Photo grid tile size can be adjusted with the new `-`/`+` buttons above the grid. The choice is remembered in the browser.
+
+### Fixed
+- Immich v3.2.0 support: searches (find references, find candidates, import, background and manual scans, tagging accuracy tool) now use Immich's new structured search filter on Immich 3.2.0 and later. The flat search fields used before are deprecated in 3.2.0 and will be removed in Immich v4. Older Immich versions keep using the previous format, picked automatically from the server version (addresses #55).
+- Renaming a pet now renames its Immich person with `PATCH` instead of the `PUT` call deprecated in Immich v3, falling back to `PUT` on Immich v2. A failed rename is now logged instead of silently ignored (part of #55).
+- Importing a pet from Immich gave no feedback while it ran, which can take minutes for people with many photos, so the Import button looked like it did nothing. It now shows "Importing…" and is disabled until the import finishes (part of #55).
+- The tagging accuracy tool prefilled the whole-image fallback threshold from `THRESHOLD` instead of `THRESHOLD_FALLBACK`.
+
 ## v1.7.5
 
 ### Fixed
