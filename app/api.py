@@ -122,6 +122,15 @@ def _slim_asset(a: dict) -> dict:
     return {"id": a["id"], "thumb": f"/api/crop/{a['id']}", "date": a.get("localDateTime", "")[:10], "filename": a.get("originalFileName", "")}
 
 
+def _pet_image_search_params(pet_cfg: dict) -> dict:
+    """Search filter for images within the pet's since/until date range."""
+    since, until = pet_cfg.get("since"), pet_cfg.get("until")
+    return imm.search_params(
+        asset_type="IMAGE",
+        taken_after=since + "T00:00:00.000Z" if since else None,
+        taken_before=until + "T23:59:59.999Z" if until else None,
+    )
+
 
 async def _visual_search(
     client: httpx.AsyncClient,
@@ -139,11 +148,7 @@ async def _visual_search(
     else:
         sampled = ref_ids
 
-    base: dict = {"type": "IMAGE", "size": per_ref_limit}
-    if pet_cfg.get("since"):
-        base["takenAfter"] = pet_cfg["since"] + "T00:00:00.000Z"
-    if pet_cfg.get("until"):
-        base["takenBefore"] = pet_cfg["until"] + "T23:59:59.999Z"
+    base: dict = {"size": per_ref_limit, **_pet_image_search_params(pet_cfg)}
 
     async def fetch_one(rid: str) -> list[dict]:
         try:
@@ -640,11 +645,7 @@ async def get_suggestions(name: str, limit: int = 20):
         if ref_ids:
             candidates = await _visual_search(client, ref_ids, pet_cfg, exclude)
         else:
-            body: dict = {"query": description, "type": "IMAGE", "size": 60}
-            if pet_cfg.get("since"):
-                body["takenAfter"] = pet_cfg["since"] + "T00:00:00.000Z"
-            if pet_cfg.get("until"):
-                body["takenBefore"] = pet_cfg["until"] + "T23:59:59.999Z"
+            body: dict = {"query": description, "size": 60, **_pet_image_search_params(pet_cfg)}
             resp = await client.post(f"{imm.IMMICH_URL}/api/search/smart", headers=imm.headers(), json=body)
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
@@ -1009,7 +1010,7 @@ async def get_neg_candidates(limit: int = 60):
         resp = await client.post(
             f"{imm.IMMICH_URL}/api/search/random",
             headers=imm.headers(),
-            json={"size": 50, "type": "IMAGE"},
+            json={"size": 50, **imm.search_params(asset_type="IMAGE")},
         )
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
@@ -1108,7 +1109,7 @@ async def import_pet(body: PetImport):
         search = await client.post(
             f"{imm.IMMICH_URL}/api/search/metadata",
             headers={**imm.headers(), "Content-Type": "application/json"},
-            json={"personIds": [body.person_id], "size": 200},
+            json={"size": 200, **imm.search_params(person_id=body.person_id)},
         )
         if search.status_code == 200:
             block = search.json().get("assets", {})
