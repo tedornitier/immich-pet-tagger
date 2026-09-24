@@ -11,7 +11,9 @@ def _make_stub(name: str) -> types.ModuleType:
 
 def _stub_torch() -> None:
     torch = _make_stub("torch")
-    torch.cuda = types.SimpleNamespace(is_available=lambda: False, Stream=None)
+    torch.cuda = types.SimpleNamespace(is_available=lambda: False, Stream=None, empty_cache=lambda: None)
+    torch.backends = types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False))
+    torch.mps = types.SimpleNamespace(empty_cache=lambda: None)
     torch.no_grad = lambda: __import__("contextlib").nullcontext()
 
     class _FakeTensor:

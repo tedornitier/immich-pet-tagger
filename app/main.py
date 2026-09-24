@@ -8,7 +8,6 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-import torch
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +16,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 from embedder import load_embed_cache
 from api import router as api_router
+from device import pick_device
 import inference
 import detector as det
 import embedder as emb
@@ -37,7 +37,7 @@ LONG_REQUEST_TIMEOUT = int(os.environ.get("LONG_REQUEST_TIMEOUT", 120))
 
 
 async def polling_loop():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = pick_device()
     log.info(f"Poller started. Interval: {POLL_INTERVAL}s. Data dir: {DATA_DIR}. Device: {device}")
     migrated = False
     while True:

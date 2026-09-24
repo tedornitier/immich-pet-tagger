@@ -24,10 +24,9 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-import torch
-
 import detector as det
 import embedder as emb
+from device import empty_cache, pick_device
 
 log = logging.getLogger("inference")
 
@@ -73,8 +72,7 @@ def inference_session():
                 det.stop_workers()
                 emb.stop_workers()
                 gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                empty_cache(pick_device())
                 if _libc is not None:
                     _libc.malloc_trim(0)
                 log.info("Inference models unloaded")

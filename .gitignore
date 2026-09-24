@@ -8,5 +8,6 @@ __pycache__/
 *.pyo
 .env
 *.log
+.venv/
 docker-compose.override.yml
 TODO.md
