@@ -571,7 +571,10 @@ async function init() {
   const settings = await (await fetch('/api/settings')).json();
   document.getElementById('benchYoloConf').value = settings.yolo_conf;
   if (settings.threshold !== undefined) {
-    tierThresholds = {yolo: settings.threshold, fallback_bucket: settings.threshold};
+    tierThresholds = {
+      yolo: settings.threshold,
+      fallback_bucket: settings.threshold_fallback !== undefined ? settings.threshold_fallback : settings.threshold,
+    };
   }
   const resp = await fetch('/api/analysis/benchmark');
   const data = await resp.json();

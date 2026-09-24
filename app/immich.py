@@ -4,6 +4,7 @@ Async functions are used by the API routes."""
 import logging
 import os
 import threading
+import time
 
 import httpx
 import requests
@@ -222,6 +223,132 @@ async def delete_face(client: httpx.AsyncClient, face_id: str, asset_id: str, un
 
 
 # ---------------------------------------------------------------------------
+# Search request format (backward compatibility)
+#
+# Immich v3.2.0 replaced the flat search fields (type, personIds, takenAfter,
+# createdAfter, page, order, ...) of /api/search/{metadata,smart,random} with a
+# structured `filter` object and cursor pagination. The flat fields are removed
+# in Immich v4. Servers older than 3.2.0 silently ignore an unknown `filter` key
+# and would run the search unfiltered, so the format cannot be picked by trial
+# and error: it is picked from the server version instead.
+#
+# The legacy branches below exist only for Immich < 3.2.0 and can be deleted,
+# together with uses_search_filter(), once those versions are no longer supported.
+# ---------------------------------------------------------------------------
+
+SEARCH_FILTER_MIN_VERSION = (3, 2, 0)
+_VERSION_RETRY_SECONDS = 60
+
+_search_filter: bool | None = None
+_search_filter_failed_at = 0.0
+_search_filter_lock = threading.Lock()
+
+
+def uses_search_filter() -> bool:
+    """True when the Immich server takes the structured search `filter` (>= 3.2.0).
+    A successful answer is cached for the process lifetime. A failed version lookup
+    falls back to the legacy fields (still accepted by every server before v4) and is
+    retried at most once every _VERSION_RETRY_SECONDS."""
+    global _search_filter, _search_filter_failed_at
+    if _search_filter is not None:
+        return _search_filter
+    with _search_filter_lock:
+        if _search_filter is not None:
+            return _search_filter
+        if _search_filter_failed_at and time.monotonic() - _search_filter_failed_at < _VERSION_RETRY_SECONDS:
+            return False
+        try:
+            r = requests.get(f"{IMMICH_URL}/api/server/version", timeout=5)
+            r.raise_for_status()
+            v = r.json()
+            version = (int(v["major"]), int(v["minor"]), int(v["patch"]))
+        except Exception as e:
+            _search_filter_failed_at = time.monotonic()
+            log.warning(f"Could not read Immich server version ({e}), using legacy search fields")
+            return False
+        _search_filter = version >= SEARCH_FILTER_MIN_VERSION
+        fmt = "structured search filter" if _search_filter else "legacy search fields"
+        log.info(f"Immich server {'.'.join(map(str, version))}: using {fmt}")
+        return _search_filter
+
+
+def search_params(
+    *,
+    asset_type: str | None = None,
+    person_id: str | None = None,
+    taken_after: str | None = None,
+    taken_before: str | None = None,
+    created_after: str | None = None,
+) -> dict:
+    """Filter fields to merge into a search request body, in the format the server expects.
+    Non-filter keys (size, query, queryAssetId) and paging/sorting are left to the caller."""
+    if not uses_search_filter():
+        # Legacy (Immich < 3.2.0): flat top-level fields.
+        legacy: dict = {}
+        if asset_type:
+            legacy["type"] = asset_type
+        if person_id:
+            legacy["personIds"] = [person_id]
+        if taken_after:
+            legacy["takenAfter"] = taken_after
+        if taken_before:
+            legacy["takenBefore"] = taken_before
+        if created_after:
+            legacy["createdAfter"] = created_after
+        return legacy
+    # The flat fields skipped trashed assets by default, the filter does not.
+    flt: dict = {"trashedAt": {"eq": None}}
+    if asset_type:
+        flt["type"] = {"eq": asset_type}
+    if person_id:
+        flt["personIds"] = {"all": [person_id]}
+    taken: dict = {}
+    if taken_after:
+        taken["gte"] = taken_after
+    if taken_before:
+        taken["lte"] = taken_before
+    if taken:
+        flt["takenAt"] = taken
+    if created_after:
+        flt["createdAt"] = {"gte": created_after}
+    return {"filter": flt}
+
+
+def _search_metadata_pages(params: dict, size: int, label: str):
+    """Yield each page's items from /api/search/metadata, oldest first.
+    params comes from search_params(). Raises RuntimeError on a non-200 page."""
+    url = f"{IMMICH_URL}/api/search/metadata"
+    hdrs = {**headers(), "Content-Type": "application/json"}
+    use_filter = uses_search_filter()
+    if use_filter:
+        body = {**params, "size": size, "orderBy": {"field": "fileCreatedAt", "direction": "asc"}}
+    else:
+        # Legacy (Immich < 3.2.0): flat sort order, numbered pages.
+        body = {**params, "size": size, "order": "asc"}
+    page = 1
+    cursor = None
+    while True:
+        if use_filter:
+            req = {**body, "cursor": cursor} if cursor else body
+        else:
+            req = {**body, "page": page}
+        r = requests.post(url, json=req, headers=hdrs, timeout=30)
+        if r.status_code != 200:
+            raise RuntimeError(f"{label}: HTTP {r.status_code} on page {page}: {r.text[:200]}")
+        data = r.json()
+        block = data.get("assets") or {}
+        items = (block.get("items") if isinstance(block, dict) else None) or data.get("items") or []
+        yield items
+        if use_filter:
+            cursor = block.get("nextCursor") if isinstance(block, dict) else None
+            if not cursor:
+                break
+        elif len(items) < size:
+            break
+        page += 1
+
+
+# ---------------------------------------------------------------------------
 # Sync (poller)
 # ---------------------------------------------------------------------------
 
@@ -230,15 +357,13 @@ def fetch_assets_created_after(created_after_iso: str) -> list[tuple[str, str, s
     Uses createdAt (upload time) as the cursor so photos synced late never fall behind the
     cutoff, but also returns fileCreatedAt (EXIF taken date) since that, not the upload time,
     is what a pet's since/until date range must be checked against."""
-    return _fetch_assets({"createdAfter": created_after_iso}, ts_field="createdAt", label="fetch_assets_created_after", extra_field="fileCreatedAt")
+    return _fetch_assets(search_params(created_after=created_after_iso), ts_field="createdAt", label="fetch_assets_created_after", extra_field="fileCreatedAt")
 
 
 def fetch_assets_taken_after(taken_after_iso: str, taken_before_iso: str | None = None) -> list[tuple[str, str]]:
     """Return [(asset_id, fileCreatedAt_iso), ...] for manual scans.
     Uses takenAfter (EXIF date) so the date picker matches what the user sees in the Immich library."""
-    query: dict = {"takenAfter": taken_after_iso}
-    if taken_before_iso:
-        query["takenBefore"] = taken_before_iso
+    query = search_params(taken_after=taken_after_iso, taken_before=taken_before_iso)
     return _fetch_assets(query, ts_field="fileCreatedAt", label="fetch_assets_taken_after")
 
 
@@ -246,40 +371,16 @@ def fetch_assets_in_range(taken_after_iso: str, taken_before_iso: str | None = N
     """Return raw search/metadata items (id, type, fileCreatedAt, ...) for a date range.
     Unlike fetch_assets_taken_after, keeps the full item so callers can tell photos from
     videos (the 'type' field), used by the benchmark analysis."""
-    query: dict = {"takenAfter": taken_after_iso}
-    if taken_before_iso:
-        query["takenBefore"] = taken_before_iso
-    url = f"{IMMICH_URL}/api/search/metadata"
-    hdrs = {**headers(), "Content-Type": "application/json"}
+    query = search_params(taken_after=taken_after_iso, taken_before=taken_before_iso)
     out: list[dict] = []
-    page = 1
-    size = 1000
-    while True:
-        r = requests.post(url, json={**query, "page": page, "size": size, "order": "asc"}, headers=hdrs, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        block = data.get("assets") or {}
-        items = (block.get("items") if isinstance(block, dict) else None) or data.get("items") or []
+    for items in _search_metadata_pages(query, size=1000, label="fetch_assets_in_range"):
         out.extend(items)
-        if len(items) < size:
-            break
-        page += 1
     return out
 
 
 def _fetch_assets(query: dict, ts_field: str, label: str, extra_field: str | None = None) -> list[tuple]:
-    url = f"{IMMICH_URL}/api/search/metadata"
-    hdrs = {**headers(), "Content-Type": "application/json"}
     out: list[tuple] = []
-    page = 1
-    size = 1000
-    while True:
-        r = requests.post(url, json={**query, "page": page, "size": size, "order": "asc"}, headers=hdrs, timeout=30)
-        if r.status_code != 200:
-            raise RuntimeError(f"{label}: HTTP {r.status_code} on page {page}: {r.text[:200]}")
-        data = r.json()
-        block = data.get("assets") or {}
-        items = (block.get("items") if isinstance(block, dict) else None) or data.get("items") or []
+    for items in _search_metadata_pages(query, size=1000, label=label):
         owner_id = get_owner_id()
         for a in items:
             aid = a.get("id")
@@ -292,9 +393,6 @@ def _fetch_assets(query: dict, ts_field: str, label: str, extra_field: str | Non
                     out.append((str(aid).strip("\x00"), ts, extra))
                 else:
                     out.append((str(aid).strip("\x00"), ts))
-        if len(items) < size:
-            break
-        page += 1
     return out
 
 

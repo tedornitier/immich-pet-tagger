@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -41,6 +41,10 @@
         <div class="results-header">
           <span class="panel-label" id="resultsLabel"></span>
           <div class="results-actions">
+            <div class="tile-zoom" title="Tile size">
+              <button class="btn" onclick="changeTileSize(-40)">&minus;</button>
+              <button class="btn" onclick="changeTileSize(40)">+</button>
+            </div>
             <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
             <button class="btn btn-primary" id="assignBtn" onclick="assignSelected()" style="display:none" title="Clear, close-up shot, your pet is the only subject.">Add to pet</button>
             <button class="btn" id="skipBtn" onclick="skipSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
@@ -202,7 +206,7 @@
     <div class="modal-error" id="importDetailError"></div>
     <div class="modal-actions">
       <button class="btn" onclick="backToImportPicker()">← Back</button>
-      <button class="btn btn-primary" onclick="submitImportPet()">Import</button>
+      <button class="btn btn-primary" id="importPetBtn" onclick="submitImportPet()">Import</button>
     </div>
   </div>
 </div>
@@ -211,8 +215,9 @@
   <div class="modal">
     <h2 id="addByIdTitle">Add by ID or link</h2>
     <div class="field">
-      <label>Immich photo link or asset ID</label>
+      <label id="addByIdLabel">Immich photo link or asset ID</label>
       <input type="text" id="addByIdInput" placeholder="immich:2283/photos/{UUID} or a bare ID" onkeydown="if(event.key==='Enter') submitAddById()">
+      <textarea id="addByIdTextarea" rows="6" placeholder="One link or ID per line" style="display:none; width:100%; background:var(--bg3); border:0.5px solid var(--border); border-radius:var(--radius-sm); color:var(--text); font-size:13px; padding:7px 10px; outline:none; resize:vertical; font-family:inherit;"></textarea>
       <div class="hint" id="addByIdHint"></div>
     </div>
     <div class="modal-error" id="addByIdError"></div>
@@ -225,6 +230,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=3"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

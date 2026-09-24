@@ -110,16 +110,26 @@ async def get_config():
 
 @router.get("/settings")
 async def get_settings():
-    """Env-var-configured defaults (THRESHOLD, YOLO_CONF). Read-only: production config
-    lives in docker-compose.yml only. Used to prefill the benchmark tool's per-run
-    threshold overrides, which are never persisted, they only apply to that one run."""
-    from poller import THRESHOLD
-    return {"threshold": THRESHOLD, "yolo_conf": det.YOLO_CONF}
+    """Env-var-configured defaults (THRESHOLD, THRESHOLD_FALLBACK, YOLO_CONF). Read-only:
+    production config lives in docker-compose.yml only. Used to prefill the benchmark
+    tool's per-run threshold overrides, which are never persisted, they only apply to
+    that one run."""
+    from poller import THRESHOLD, THRESHOLD_FALLBACK
+    return {"threshold": THRESHOLD, "threshold_fallback": THRESHOLD_FALLBACK, "yolo_conf": det.YOLO_CONF}
 
 
 def _slim_asset(a: dict) -> dict:
     return {"id": a["id"], "thumb": f"/api/crop/{a['id']}", "date": a.get("localDateTime", "")[:10], "filename": a.get("originalFileName", "")}
 
+
+def _pet_image_search_params(pet_cfg: dict) -> dict:
+    """Search filter for images within the pet's since/until date range."""
+    since, until = pet_cfg.get("since"), pet_cfg.get("until")
+    return imm.search_params(
+        asset_type="IMAGE",
+        taken_after=since + "T00:00:00.000Z" if since else None,
+        taken_before=until + "T23:59:59.999Z" if until else None,
+    )
 
 
 async def _visual_search(
@@ -138,11 +148,7 @@ async def _visual_search(
     else:
         sampled = ref_ids
 
-    base: dict = {"type": "IMAGE", "size": per_ref_limit}
-    if pet_cfg.get("since"):
-        base["takenAfter"] = pet_cfg["since"] + "T00:00:00.000Z"
-    if pet_cfg.get("until"):
-        base["takenBefore"] = pet_cfg["until"] + "T23:59:59.999Z"
+    base: dict = {"size": per_ref_limit, **_pet_image_search_params(pet_cfg)}
 
     async def fetch_one(rid: str) -> list[dict]:
         try:
@@ -219,7 +225,13 @@ async def update_pet(name: str, update: PetUpdate):
         person_id = config[name].get("person_id")
         if person_id:
             async with httpx.AsyncClient(timeout=15) as client:
-                await client.put(f"{imm.IMMICH_URL}/api/people/{person_id}", headers=imm.headers(), json={"name": new_name})
+                url = f"{imm.IMMICH_URL}/api/people/{person_id}"
+                # PATCH replaces the PUT deprecated in Immich v3. Immich v2 only has PUT.
+                resp = await client.patch(url, headers=imm.headers(), json={"name": new_name})
+                if resp.status_code in (404, 405):
+                    resp = await client.put(url, headers=imm.headers(), json={"name": new_name})
+                if resp.status_code != 200:
+                    log.warning(f"Failed to rename Immich person {person_id} to '{new_name}': {resp.status_code} {resp.text[:200]}")
         config[new_name] = config.pop(name)
         name = new_name
 
@@ -354,6 +366,40 @@ async def add_negatives(body: PetAssets):
     data.save_negative_ids(merged, DATA_DIR)
     log.info(f"Negatives: {len(merged)} total (+{len(set(body.asset_ids) - existing)} new)")
     return {"ok": True, "count": len(merged)}
+
+
+@router.post("/negatives/batch")
+async def add_negatives_batch(body: PetAssets):
+    """Validate and add multiple asset IDs as negatives, loading YOLO/CLIP once
+    for the whole batch instead of once per asset like the single-add path."""
+    ids = list(dict.fromkeys(body.asset_ids))  # de-dupe, preserve order
+
+    async def asset_exists(asset_id: str) -> bool:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}", headers=imm.headers())
+        return resp.status_code == 200
+
+    exists_flags = await asyncio.gather(*(asset_exists(aid) for aid in ids))
+    valid_ids = [aid for aid, ok in zip(ids, exists_flags) if ok]
+    invalid_ids = [aid for aid, ok in zip(ids, exists_flags) if not ok]
+
+    def warm_cache():
+        with inference_session():
+            for aid in valid_ids:
+                try:
+                    emb.get_crops_and_embed(aid)
+                except Exception as e:
+                    log.warning(f"Could not embed asset {aid} for negatives batch: {e}")
+
+    if valid_ids:
+        await asyncio.to_thread(warm_cache)
+
+    existing = set(data.load_negative_ids(DATA_DIR))
+    merged = list(existing | set(valid_ids))
+    data.save_negative_ids(merged, DATA_DIR)
+    added = len(set(valid_ids) - existing)
+    log.info(f"Negatives batch: {len(merged)} total (+{added} new, {len(invalid_ids)} invalid)")
+    return {"ok": True, "count": len(merged), "added": added, "invalid_ids": invalid_ids}
 
 
 @router.delete("/pets/{name}/refs")
@@ -599,11 +645,7 @@ async def get_suggestions(name: str, limit: int = 20):
         if ref_ids:
             candidates = await _visual_search(client, ref_ids, pet_cfg, exclude)
         else:
-            body: dict = {"query": description, "type": "IMAGE", "size": 60}
-            if pet_cfg.get("since"):
-                body["takenAfter"] = pet_cfg["since"] + "T00:00:00.000Z"
-            if pet_cfg.get("until"):
-                body["takenBefore"] = pet_cfg["until"] + "T23:59:59.999Z"
+            body: dict = {"query": description, "size": 60, **_pet_image_search_params(pet_cfg)}
             resp = await client.post(f"{imm.IMMICH_URL}/api/search/smart", headers=imm.headers(), json=body)
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
@@ -968,7 +1010,7 @@ async def get_neg_candidates(limit: int = 60):
         resp = await client.post(
             f"{imm.IMMICH_URL}/api/search/random",
             headers=imm.headers(),
-            json={"size": 50, "type": "IMAGE"},
+            json={"size": 50, **imm.search_params(asset_type="IMAGE")},
         )
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
@@ -1067,7 +1109,7 @@ async def import_pet(body: PetImport):
         search = await client.post(
             f"{imm.IMMICH_URL}/api/search/metadata",
             headers={**imm.headers(), "Content-Type": "application/json"},
-            json={"personIds": [body.person_id], "size": 200},
+            json={"size": 200, **imm.search_params(person_id=body.person_id)},
         )
         if search.status_code == 200:
             block = search.json().get("assets", {})

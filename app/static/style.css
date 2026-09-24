@@ -6,6 +6,7 @@
   --accent: #7c6af7; --accent2: #5e4fd4;
   --success: #3da87a; --danger: #c94a4a;
   --radius: 10px; --radius-sm: 6px;
+  --tile-size: 120px;
 }
 body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
 .models-banner { display: none; background: rgba(201,74,74,0.12); border-bottom: 0.5px solid rgba(201,74,74,0.35); color: #e08080; font-size: 12px; padding: 8px 16px; line-height: 1.5; }
@@ -36,6 +37,7 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .btn:hover { background: var(--bg3); border-color: var(--accent); color: var(--accent); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+.btn:disabled { opacity: 0.6; cursor: wait; pointer-events: none; }
 .btn-danger { border-color: var(--danger); color: var(--danger); }
 .btn-danger:hover { background: rgba(201,74,74,0.1); border-color: var(--danger); color: var(--danger); }
 .content { flex: 1; display: flex; overflow: hidden; }
@@ -43,7 +45,9 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .results-header { padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 0.5px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
 .results-actions { display: flex; align-items: center; gap: 8px; }
 .panel-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); flex: 1; }
-.photo-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); grid-auto-rows: 120px; gap: 6px; align-content: start; }
+.photo-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-size), 1fr)); grid-auto-rows: var(--tile-size); gap: 6px; align-content: start; }
+.tile-zoom { display: flex; align-items: center; gap: 2px; }
+.tile-zoom .btn { padding: 5px 9px; font-size: 13px; line-height: 1; }
 .photo-thumb { border-radius: var(--radius-sm); overflow: hidden; cursor: pointer; position: relative; border: 0.5px solid var(--border); transition: border-color 0.1s; background: var(--bg3); user-select: none; }
 .photo-thumb:hover { border-color: var(--accent); }
 .photo-thumb.selected { border: 2px solid var(--accent); }
