@@ -37,6 +37,7 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .btn:hover { background: var(--bg3); border-color: var(--accent); color: var(--accent); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+.btn:disabled { opacity: 0.6; cursor: wait; pointer-events: none; }
 .btn-danger { border-color: var(--danger); color: var(--danger); }
 .btn-danger:hover { background: rgba(201,74,74,0.1); border-color: var(--danger); color: var(--danger); }
 .content { flex: 1; display: flex; overflow: hidden; }

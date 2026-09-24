@@ -958,7 +958,8 @@ function closeImportDetail() { document.getElementById('importDetailModal').clas
 function backToImportPicker() { document.getElementById('importDetailModal').classList.remove('open'); document.getElementById('importPickerModal').classList.add('open'); }
 
 async function submitImportPet() {
-  if (!_importSelectedPerson) return;
+  const btn = document.getElementById('importPetBtn');
+  if (!_importSelectedPerson || btn.disabled) return;
   clearModalError('importDetailError');
   const description = document.getElementById('importPetDescription').value.trim();
   if (!description) { modalError('importDetailError', 'Description is required'); return; }
@@ -968,6 +969,9 @@ async function submitImportPet() {
   if (sinceRaw && !dateRe.test(sinceRaw)) { modalError('importDetailError', 'Invalid "since" date'); return; }
   if (untilRaw && !dateRe.test(untilRaw)) { modalError('importDetailError', 'Invalid "until" date'); return; }
   if (sinceRaw && untilRaw && sinceRaw > untilRaw) { modalError('importDetailError', '"Since" must be before "until"'); return; }
+  // Import fetches faces and runs YOLO on up to 200 photos, so it can take minutes.
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
   try {
     const result = await api('/api/pets/import', { method: 'POST', body: {
       person_id: _importSelectedPerson.id,
@@ -981,6 +985,10 @@ async function submitImportPet() {
     await selectPet(result.name);
     toast(result.ref_count > 0 ? `Imported ${result.name} with ${result.ref_count} refs` : `Imported ${result.name} with 0 refs. No animals were detected in the reference photos. Add refs manually.`, result.ref_count > 0 ? 'success' : 'warn');
   } catch(e) { modalError('importDetailError', e.message); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Import';
+  }
 }
 
 // ---------------------------------------------------------------------------

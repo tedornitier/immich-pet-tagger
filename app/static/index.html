@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -206,7 +206,7 @@
     <div class="modal-error" id="importDetailError"></div>
     <div class="modal-actions">
       <button class="btn" onclick="backToImportPicker()">← Back</button>
-      <button class="btn btn-primary" onclick="submitImportPet()">Import</button>
+      <button class="btn btn-primary" id="importPetBtn" onclick="submitImportPet()">Import</button>
     </div>
   </div>
 </div>
@@ -230,6 +230,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>
