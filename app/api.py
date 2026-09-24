@@ -220,7 +220,13 @@ async def update_pet(name: str, update: PetUpdate):
         person_id = config[name].get("person_id")
         if person_id:
             async with httpx.AsyncClient(timeout=15) as client:
-                await client.put(f"{imm.IMMICH_URL}/api/people/{person_id}", headers=imm.headers(), json={"name": new_name})
+                url = f"{imm.IMMICH_URL}/api/people/{person_id}"
+                # PATCH replaces the PUT deprecated in Immich v3. Immich v2 only has PUT.
+                resp = await client.patch(url, headers=imm.headers(), json={"name": new_name})
+                if resp.status_code in (404, 405):
+                    resp = await client.put(url, headers=imm.headers(), json={"name": new_name})
+                if resp.status_code != 200:
+                    log.warning(f"Failed to rename Immich person {person_id} to '{new_name}': {resp.status_code} {resp.text[:200]}")
         config[new_name] = config.pop(name)
         name = new_name
 
