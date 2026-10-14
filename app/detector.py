@@ -158,12 +158,16 @@ def dedupe_boxes(boxes: list[tuple[float, float, float, float, float]]) -> list[
     """Merge animal boxes that are the same animal, across classes. Input and output are
     (conf, x1, y1, x2, y2), highest confidence first.
 
-    Walks boxes by confidence. A box overlapping a kept one (IoU > IOU_THRESHOLD) is a
-    cross-class duplicate and is dropped. A box mostly inside a kept one is a body part
-    (leg, tail, head) and is dropped. When instead a kept box lies mostly inside the new,
-    lower-confidence one, the new box is the whole animal and replaces it, as long as
-    its confidence is at least half the kept box's (so a large spurious box cannot
-    swallow a confident detection)."""
+    1. Cross-class duplicates: a box whose IoU with a more confident kept box exceeds
+       IOU_THRESHOLD is dropped.
+    2. Group boxes: a box that contains two or more other boxes (each more than
+       CONTAINMENT_THRESHOLD inside it) is dropped and the inner boxes kept. It is either
+       a box around two pets lying together, or one pet split in parts; geometry cannot
+       tell those apart, and merging two pets into one box loses one of them.
+    3. Whole animal vs one part of it: when one box lies inside another, the outer box
+       (the whole animal) is kept if its confidence is at least half the inner one's,
+       otherwise the inner box is kept (a large, unsure box does not swallow a confident
+       detection). Two boxes each inside the other keep the more confident one."""
     def area(b):
         return max(0.0, b[3] - b[1]) * max(0.0, b[4] - b[2])
 
@@ -172,28 +176,42 @@ def dedupe_boxes(boxes: list[tuple[float, float, float, float, float]]) -> list[
         iy = max(0.0, min(a[4], b[4]) - max(a[2], b[2]))
         return ix * iy
 
+    def inside(small, big):
+        a = area(small)
+        return a > 0 and inter(small, big) / a > CONTAINMENT_THRESHOLD
+
     kept: list[tuple[float, float, float, float, float]] = []
-    for b in boxes:
-        merged = False
-        for i, k in enumerate(kept):
+    for b in sorted(boxes, reverse=True):
+        dup = False
+        for k in kept:
             ov = inter(b, k)
-            if ov <= 0:
-                continue
             union = area(b) + area(k) - ov
             if union > 0 and ov / union > IOU_THRESHOLD:
-                merged = True
-            elif area(b) > 0 and ov / area(b) > CONTAINMENT_THRESHOLD:
-                merged = True
-            elif area(k) > 0 and ov / area(k) > CONTAINMENT_THRESHOLD:
-                if b[0] >= 0.5 * k[0]:
-                    kept[i] = b
-                merged = True
-            if merged:
+                dup = True
                 break
-        if not merged:
+        if not dup:
             kept.append(b)
-    kept.sort(reverse=True)
-    return kept
+
+    groups = {
+        i for i, big in enumerate(kept)
+        if sum(1 for j, small in enumerate(kept) if j != i and inside(small, big)) >= 2
+    }
+    kept = [b for i, b in enumerate(kept) if i not in groups]
+
+    drop: set[int] = set()
+    for i, big in enumerate(kept):
+        for j, small in enumerate(kept):
+            if i == j or not inside(small, big):
+                continue
+            if inside(big, small):
+                drop.add(j if big[0] >= small[0] else i)
+            elif big[0] >= 0.5 * small[0]:
+                drop.add(j)
+            else:
+                drop.add(i)
+    out = [b for i, b in enumerate(kept) if i not in drop]
+    out.sort(reverse=True)
+    return out
 
 
 def _ensure_yolo_workers() -> None:
