@@ -21,6 +21,16 @@ YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", 640))
 YOLO_MODEL_NAME = os.environ.get("YOLO_MODEL_NAME", "yolov8n.pt")
 YOLO_CONF = float(os.environ.get("YOLO_CONF", 0.25))
 IOU_THRESHOLD = float(os.environ.get("IOU_THRESHOLD", 0.7))
+# Cross-class duplicate suppression, applied to animal boxes only (after the class
+# filter, so a person holding a cat can never suppress the cat). YOLO's own NMS is
+# per class: the same cat seen as "cat" 0.9 and "dog" 0.3 survives twice, and a
+# box around just a leg or the tail survives inside the whole-animal box because
+# IoU against a much larger box stays low. Each surviving box is then classified
+# on its own, so one animal could be tagged as two different pets.
+# A box is dropped when its IoU with a kept box exceeds IOU_THRESHOLD, or when more
+# than CONTAINMENT_THRESHOLD of its own area lies inside a kept box. Set to 1.0 to
+# disable the containment rule.
+CONTAINMENT_THRESHOLD = float(os.environ.get("CONTAINMENT_THRESHOLD", 0.8))
 
 # Passed to the model call itself: a permissive floor so boxes are never discarded before
 # reaching Python. The real cutoff (YOLO_CONF, optionally overridden per request, e.g. by
@@ -132,7 +142,7 @@ def _yolo_batch_loop(worker_id: int) -> None:
                         x1, y1, x2, y2 = box.xyxyn[0].tolist()
                         boxes.append((conf, x1, y1, x2, y2))
                     boxes.sort(reverse=True)
-                    req.result = boxes  # (conf, x1, y1, x2, y2), highest confidence first
+                    req.result = dedupe_boxes(boxes)  # (conf, x1, y1, x2, y2), highest confidence first
                     req.event.set()
         except Exception as e:
             log.warning(f"YOLO worker {worker_id} batch error: {e}")
@@ -142,6 +152,48 @@ def _yolo_batch_loop(worker_id: int) -> None:
             for req in batch:
                 req.result = []
                 req.event.set()
+
+
+def dedupe_boxes(boxes: list[tuple[float, float, float, float, float]]) -> list[tuple[float, float, float, float, float]]:
+    """Merge animal boxes that are the same animal, across classes. Input and output are
+    (conf, x1, y1, x2, y2), highest confidence first.
+
+    Walks boxes by confidence. A box overlapping a kept one (IoU > IOU_THRESHOLD) is a
+    cross-class duplicate and is dropped. A box mostly inside a kept one is a body part
+    (leg, tail, head) and is dropped. When instead a kept box lies mostly inside the new,
+    lower-confidence one, the new box is the whole animal and replaces it, as long as
+    its confidence is at least half the kept box's (so a large spurious box cannot
+    swallow a confident detection)."""
+    def area(b):
+        return max(0.0, b[3] - b[1]) * max(0.0, b[4] - b[2])
+
+    def inter(a, b):
+        ix = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+        iy = max(0.0, min(a[4], b[4]) - max(a[2], b[2]))
+        return ix * iy
+
+    kept: list[tuple[float, float, float, float, float]] = []
+    for b in boxes:
+        merged = False
+        for i, k in enumerate(kept):
+            ov = inter(b, k)
+            if ov <= 0:
+                continue
+            union = area(b) + area(k) - ov
+            if union > 0 and ov / union > IOU_THRESHOLD:
+                merged = True
+            elif area(b) > 0 and ov / area(b) > CONTAINMENT_THRESHOLD:
+                merged = True
+            elif area(k) > 0 and ov / area(k) > CONTAINMENT_THRESHOLD:
+                if b[0] >= 0.5 * k[0]:
+                    kept[i] = b
+                merged = True
+            if merged:
+                break
+        if not merged:
+            kept.append(b)
+    kept.sort(reverse=True)
+    return kept
 
 
 def _ensure_yolo_workers() -> None:
