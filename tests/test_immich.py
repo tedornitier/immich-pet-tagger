@@ -252,3 +252,20 @@ def test_fetch_assets_in_range_keeps_full_items(monkeypatch):
     assert result == items
     assert calls[0]["takenAfter"] == "2024-01-01T00:00:00.000Z"
     assert calls[0]["takenBefore"] == "2024-01-31T23:59:59.999Z"
+
+
+def test_fetch_assets_in_range_drops_other_owner(monkeypatch):
+    # Partner photos can never carry this user's pet faces, so the benchmark would count
+    # every correct match on them as a false positive.
+    immich._owner_id = "owner-A"
+    assets = [_make_asset("a0", "owner-A"), _make_asset("a1", "owner-B")]
+    monkeypatch.setattr(immich.requests, "post", lambda *a, **kw: _search_response(assets))
+    result = immich.fetch_assets_in_range("2024-01-01T00:00:00.000Z")
+    assert [a["id"] for a in result] == ["a0"]
+
+
+def test_drop_foreign_assets_keeps_all_when_owner_unknown(monkeypatch):
+    immich._owner_id = None
+    monkeypatch.setattr(immich.requests, "get", lambda *a, **kw: _error_response())
+    assets = [_make_asset("a0", "owner-A"), _make_asset("a1", "owner-B")]
+    assert immich.drop_foreign_assets(assets, "test") == assets

@@ -23,7 +23,7 @@ THRESHOLD_FALLBACK = float(os.environ.get("THRESHOLD_FALLBACK", THRESHOLD))
 """Separate, optional threshold for whole-image fallback classifications (YOLO found no
 animal to crop). Defaults to THRESHOLD itself, so leaving it unset behaves exactly like
 before this existed. The tagging accuracy tool has consistently measured the fallback
-path as a meaningfully noisier signal than a real crop (see .claude/decisions.md), this
+path as a meaningfully noisier signal than a real crop, this
 lets that be corrected for in live tagging, not just observed in the diagnostic."""
 
 _count_lock = threading.Lock()
@@ -185,6 +185,7 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
         # against, since a late-imported old photo can have a recent createdAt.
         assets = imm.fetch_assets_created_after(last_ts)
     log.info(f"Fetched {len(assets)} assets in {time.time()-t0:.1f}s")
+    counts["fetched"] = len(assets)
 
     if not assets:
         log.info("No new assets.")

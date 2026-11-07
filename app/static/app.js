@@ -2,7 +2,12 @@ let pets = [], activePet = null, selectedCrops = new Map(), refsItems = [], negI
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  if (!r.ok) { const t = await r.text().catch(() => r.statusText); throw new Error(t); }
+  if (!r.ok) {
+    let t = await r.text().catch(() => r.statusText);
+    // FastAPI errors are {"detail": "..."}, show the message instead of the raw JSON.
+    try { const j = JSON.parse(t); if (j && typeof j.detail === 'string') t = j.detail; } catch(_) {}
+    throw new Error(t);
+  }
   const d = await r.json();
   // Streamed endpoints have already sent a 200 by the time they fail, the error is in the body.
   if (d && d.stream_error) throw new Error(d.stream_error);
@@ -471,6 +476,7 @@ async function skipSelected() {
     await api('/api/skipped', { method: 'POST', body: { asset_ids: ids } });
     ids.forEach(id => document.querySelectorAll(`[data-asset-id="${id}"]`).forEach(el => el.remove()));
     selectedCrops.clear(); updateSelUI();
+    dropScanLowConf(ids);
     toast(`Ignored ${ids.length} photo${ids.length !== 1 ? 's' : ''}. Won't appear again.`, 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -514,8 +520,9 @@ async function addSelectedAsNegatives() {
       if (el) { el.classList.remove('selected'); el.classList.add('is-neg'); }
     });
     selectedCrops.clear(); updateSelUI();
+    dropScanLowConf(assetIds);
     await loadNegatives();
-    toast('Added to "not my pets"', 'success');
+    toast('Added to "not a pet"', 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -545,9 +552,9 @@ async function viewNegCandidates() {
     clearInterval(negPollTimer); negPollTimer = null;
     if (negGeneration !== myGen) return;
     updateNegStatus();
-    label.textContent = `${d.assets.length} candidate${d.assets.length !== 1 ? 's' : ''} for "not my pets"`;
+    label.textContent = `${d.assets.length} candidate${d.assets.length !== 1 ? 's' : ''} for "not a pet"`;
     if (!d.assets.length) {
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No candidates found</div><div class="empty-sub">Classifier is well calibrated</div></div>';
+      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No candidates found</div><div class="empty-sub">No uncertain photos in this random sample. Click "Find candidates" again to try another sample.</div></div>';
       return;
     }
     const thr = d.threshold || 0.8;
@@ -579,12 +586,12 @@ async function clearAllRefs() {
 }
 
 async function clearAllNegatives() {
-  if (!confirm(`Remove all "not my pets" photos from Pet Tagger? This will not affect Immich.`)) return;
+  if (!confirm(`Remove all "not a pet" photos from Pet Tagger? This will not affect Immich.`)) return;
   try {
     await api('/api/negatives/all', { method: 'DELETE' });
     negIds = [];
     await loadNegatives();
-    toast('All "not my pets" cleared', 'success');
+    toast('All "not a pet" photos cleared', 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -594,7 +601,7 @@ async function removeNegative(id) {
     negIds = negIds.filter(i => i !== id);
     await loadNegatives();
     document.getElementById('th-' + id)?.classList.remove('is-neg');
-    toast('Removed from "not my pets"');
+    toast('Removed from "not a pet"');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -665,7 +672,9 @@ function showScanResult(r) {
   if (r.counts) {
     const c = r.counts;
     el.innerHTML = '<div class="scan-result-header">Scan result</div>' +
+      (c.fetched === 0 ? '<div style="font-size:11px;color:var(--text3);margin-top:4px;">No photos found in this date range.</div>' : '') +
       '<div class="poll-stats" style="margin-top:6px;">' +
+      (c.fetched != null ? stat('Photos scanned', c.fetched, '') : '') +
       stat('Tagged', c.added, 'nonzero-good') +
       stat('Low conf.', c.low_confidence, 'nonzero-warn') +
       stat('Other', c.unknown, '') +
@@ -722,6 +731,17 @@ function renderScanLowConfFilterBtns() {
   el.style.display = petNames.length > 1 ? 'flex' : 'none';
 }
 
+// Answered low confidence results (skipped, assigned, not a pet) leave the list, so
+// switching the pet filter re-renders without them and the filter counts stay right.
+function dropScanLowConf(assetIds) {
+  if (!scanLowConfMode) return;
+  const drop = new Set(assetIds);
+  scanLowConfAssets = scanLowConfAssets.filter(a => !drop.has(a.id));
+  if (scanLowConfFilter !== null && !scanLowConfAssets.some(a => a.pet_name === scanLowConfFilter)) scanLowConfFilter = null;
+  renderScanLowConfFilterBtns();
+  renderScanLowConf();
+}
+
 function renderScanLowConf() {
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
@@ -752,6 +772,7 @@ async function scanAssignSelected(petName) {
     });
     selectedCrops.clear(); updateSelUI();
     await refreshState();
+    dropScanLowConf(newCrops.map(c => c.asset_id));
     toast(`Added ${newCrops.length} to ${petName}`, 'success');
   } catch(e) { toast(e.message, 'error'); }
 }
@@ -1032,7 +1053,11 @@ document.getElementById('importDetailModal').addEventListener('click', function(
           localStorage.setItem(CACHE_KEY, JSON.stringify({ version: latest, ts: Date.now() }));
         }
       }
-      if (latest && latest !== current) {
+      // Only when the release is newer: a cached older tag right after updating, or a
+      // dev build ahead of the last release, must not show "update".
+      const parts = v => String(v).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+      const newer = (a, b) => { const x = parts(a), y = parts(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+      if (latest && newer(latest, current)) {
         el.innerHTML = `${current} <a href="https://github.com/tedornitier/immich-pet-tagger/releases/latest" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-weight:600;" title="Update available: ${latest}">↑ update</a>`;
       }
     } catch(_) {}

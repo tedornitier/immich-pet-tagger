@@ -380,38 +380,42 @@ def fetch_assets_in_range(taken_after_iso: str, taken_before_iso: str | None = N
     Unlike fetch_assets_taken_after, keeps the full item so callers can tell photos from
     videos (the 'type' field), used by the benchmark analysis."""
     query = search_params(taken_after=taken_after_iso, taken_before=taken_before_iso)
-    out: list[dict] = []
-    for items in _search_metadata_pages(query, size=1000, label="fetch_assets_in_range"):
-        out.extend(items)
-    return out
+    items = [a for page in _search_metadata_pages(query, size=1000, label="fetch_assets_in_range") for a in page]
+    return drop_foreign_assets(items, "fetch_assets_in_range")
 
 
-def _fetch_assets(query: dict, ts_field: str, label: str, extra_field: str | None = None) -> list[tuple]:
-    out: list[tuple] = []
-    total = 0
-    skipped = 0
-    for items in _search_metadata_pages(query, size=1000, label=label):
-        owner_id = get_owner_id()
-        total += len(items)
-        for a in items:
-            aid = a.get("id")
-            ts = a.get(ts_field) or a.get("localDateTime") or ""
-            if aid and ts:
-                if owner_id and a.get("ownerId") != owner_id:
-                    skipped += 1
-                    continue
-                if extra_field:
-                    extra = a.get(extra_field) or ts
-                    out.append((str(aid).strip("\x00"), ts, extra))
-                else:
-                    out.append((str(aid).strip("\x00"), ts))
-    if skipped and skipped == total:
+def drop_foreign_assets(items: list[dict], label: str) -> list[dict]:
+    """Drop assets owned by another Immich user (partner sharing). Immich search returns
+    partner photos too, but faces must only be written to the API key owner's assets, so
+    every search that feeds scans, finders or the benchmark goes through here. Without
+    user.read the owner is unknown and nothing is dropped (get_owner_id warns once)."""
+    owner_id = get_owner_id()
+    if not owner_id:
+        return items
+    kept = [a for a in items if a.get("ownerId") == owner_id]
+    skipped = len(items) - len(kept)
+    if skipped and not kept:
         log.warning(
-            f"{label}: skipped all {total} assets, they are owned by another Immich user (partner sharing). "
+            f"{label}: skipped all {skipped} assets, they are owned by another Immich user (partner sharing). "
             "The API key probably belongs to a different user than the photos."
         )
     elif skipped:
-        log.warning(f"{label}: skipped {skipped} of {total} assets owned by another Immich user (partner sharing).")
+        log.warning(f"{label}: skipped {skipped} of {len(items)} assets owned by another Immich user (partner sharing).")
+    return kept
+
+
+def _fetch_assets(query: dict, ts_field: str, label: str, extra_field: str | None = None) -> list[tuple]:
+    items = [a for page in _search_metadata_pages(query, size=1000, label=label) for a in page]
+    out: list[tuple] = []
+    for a in drop_foreign_assets(items, label):
+        aid = a.get("id")
+        ts = a.get(ts_field) or a.get("localDateTime") or ""
+        if aid and ts:
+            if extra_field:
+                extra = a.get(extra_field) or ts
+                out.append((str(aid).strip("\x00"), ts, extra))
+            else:
+                out.append((str(aid).strip("\x00"), ts))
     return out
 
 
