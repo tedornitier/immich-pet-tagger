@@ -476,6 +476,7 @@ async function skipSelected() {
     await api('/api/skipped', { method: 'POST', body: { asset_ids: ids } });
     ids.forEach(id => document.querySelectorAll(`[data-asset-id="${id}"]`).forEach(el => el.remove()));
     selectedCrops.clear(); updateSelUI();
+    dropScanLowConf(ids);
     toast(`Ignored ${ids.length} photo${ids.length !== 1 ? 's' : ''}. Won't appear again.`, 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -519,6 +520,7 @@ async function addSelectedAsNegatives() {
       if (el) { el.classList.remove('selected'); el.classList.add('is-neg'); }
     });
     selectedCrops.clear(); updateSelUI();
+    dropScanLowConf(assetIds);
     await loadNegatives();
     toast('Added to "not a pet"', 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
@@ -729,6 +731,17 @@ function renderScanLowConfFilterBtns() {
   el.style.display = petNames.length > 1 ? 'flex' : 'none';
 }
 
+// Answered low confidence results (skipped, assigned, not a pet) leave the list, so
+// switching the pet filter re-renders without them and the filter counts stay right.
+function dropScanLowConf(assetIds) {
+  if (!scanLowConfMode) return;
+  const drop = new Set(assetIds);
+  scanLowConfAssets = scanLowConfAssets.filter(a => !drop.has(a.id));
+  if (scanLowConfFilter !== null && !scanLowConfAssets.some(a => a.pet_name === scanLowConfFilter)) scanLowConfFilter = null;
+  renderScanLowConfFilterBtns();
+  renderScanLowConf();
+}
+
 function renderScanLowConf() {
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
@@ -759,6 +772,7 @@ async function scanAssignSelected(petName) {
     });
     selectedCrops.clear(); updateSelUI();
     await refreshState();
+    dropScanLowConf(newCrops.map(c => c.asset_id));
     toast(`Added ${newCrops.length} to ${petName}`, 'success');
   } catch(e) { toast(e.message, 'error'); }
 }
