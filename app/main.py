@@ -110,6 +110,11 @@ async def accuracy_page():
     return FileResponse(str(BASE_DIR / "static" / "accuracy.html"), headers=NO_CACHE_HEADERS)
 
 
+@app.get("/refanalysis.html")
+async def refanalysis_page():
+    return FileResponse(str(BASE_DIR / "static" / "refanalysis.html"), headers=NO_CACHE_HEADERS)
+
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",

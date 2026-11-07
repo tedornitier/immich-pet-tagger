@@ -9,11 +9,17 @@ import re
 import sqlite3
 import threading
 import time
+import warnings
 from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
-import open_clip
+with warnings.catch_warnings():
+    # open-clip-torch 2.26.1 imports timm's deprecated timm.models.layers path at import
+    # time, emitting a benign FutureWarning. Silence just that one; drop this once open_clip
+    # is bumped to a release that imports via timm.layers.
+    warnings.filterwarnings("ignore", "Importing from timm.models.layers is deprecated", FutureWarning)
+    import open_clip
 import requests
 import torch
 from PIL import Image

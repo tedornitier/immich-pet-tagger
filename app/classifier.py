@@ -3,8 +3,10 @@
 import hashlib
 import logging
 import random
+import warnings
 
 import numpy as np
+from scipy.optimize import OptimizeWarning
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
@@ -22,6 +24,33 @@ def classifier_fingerprint(pet_names: list[str], refs_per_pet: dict, negatives: 
     # A whole-photo entry's token is its bare asset id, so legacy lists fingerprint as before.
     parts.append("neg:" + ",".join(sorted(data.crop_entry_token(e) for e in negatives)))
     return hashlib.md5("\n".join(parts).encode()).hexdigest()
+
+
+def fit_logreg(clf: LogisticRegression, X, y) -> None:
+    """clf.fit, silencing one benign warning. scikit-learn 1.5.2's lbfgs solver passes
+    `iprint` to scipy, which scipy>=1.15 no longer accepts, emitting an OptimizeWarning on
+    every fit; the optimization itself is unaffected. Drop this once scikit-learn is bumped
+    to >=1.6 (which stopped passing it). Kept in one place so every training path (here, the
+    scan subprocess, and the ref-analysis diagnostic) shares the same suppression."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Unknown solver options: iprint", OptimizeWarning)
+        clf.fit(X, y)
+
+
+def subsample_negatives(negatives: list[dict], total_refs: int) -> list[dict]:
+    """At most 3x total_refs negatives, chosen deterministically."""
+    target = total_refs * 3
+    if len(negatives) > target:
+        return random.Random(0).sample(sorted(negatives, key=data.crop_entry_key), target)
+    return negatives
+
+
+def embed_negative(entry: dict) -> list:
+    """A crop entry adds only that crop, a whole-photo entry adds every crop of the photo."""
+    if entry.get("bbox"):
+        vec = emb.embed_crop_by_bbox(entry["asset_id"], entry["bbox"])
+        return [vec] if vec is not None else []
+    return emb.embed_asset_crops(entry["asset_id"])
 
 
 def build_classifier(
@@ -59,20 +88,13 @@ def build_classifier(
 
     total_refs = sum(len(refs) for refs in refs_per_pet.values())
     if negatives:
-        target = total_refs * 3
-        if len(negatives) > target:
-            negatives = random.Random(0).sample(sorted(negatives, key=data.crop_entry_key), target)
-            log.info(f"Subsampled negatives to {target} (3x {total_refs} refs)")
+        if len(negatives) > total_refs * 3:
+            negatives = subsample_negatives(negatives, total_refs)
+            log.info(f"Subsampled negatives to {len(negatives)} (3x {total_refs} refs)")
 
         log.info(f"Embedding {len(negatives)} negative samples...")
         for neg in negatives:
-            # A crop entry adds only that crop, a whole-photo entry adds every crop of the photo.
-            if neg.get("bbox"):
-                vec = emb.embed_crop_by_bbox(neg["asset_id"], neg["bbox"])
-                vecs = [vec] if vec is not None else []
-            else:
-                vecs = emb.embed_asset_crops(neg["asset_id"])
-            for vec in vecs:
+            for vec in embed_negative(neg):
                 all_vecs.append(vec)
                 all_labels.append(unknown_idx)
 
@@ -90,7 +112,7 @@ def build_classifier(
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     clf = LogisticRegression(max_iter=1000, random_state=0)
-    clf.fit(X_scaled, y)
+    fit_logreg(clf, X_scaled, y)
     log.info(f"Classifier trained on {len(y)} samples, classes: {names} ({sum(y==unknown_idx)} unknown)")
     return names, clf, scaler
 
