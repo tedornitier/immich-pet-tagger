@@ -190,6 +190,16 @@ After that, the background poller runs every hour and tags new photos automatica
 
 ---
 
+## Support
+
+I build and maintain Pet Tagger in my spare time. If it helped you get your pets into Immich, a ⭐ on the repo or an issue when something breaks (or could be better) helps a lot, honestly just as much as anything else.
+
+If you'd also like to chip in, you can [sponsor me on GitHub](https://github.com/sponsors/tedornitier). It'll turn into cat food, they eat better than me 🐾
+
+Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+
 ## Environment variables
 
 | Variable | Default | Description |
