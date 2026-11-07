@@ -17,7 +17,7 @@ Uses CLIP embeddings and a few reference photos you provide. No cloud services, 
 ## Features
 
 - **Import from Immich**: if Immich already recognizes your pet as a person, import them in one click. The tool picks up to 20 evenly distributed reference photos automatically.
-- **Find similar photos**: uses a two-stage search to surface candidates. Your reference photos are used as visual queries against Immich's smart search, and the local classifier re-ranks the results by pet probability. Falls back to text search using your description when no refs exist yet.
+- **Find references**: uses a two-stage search to surface candidates. Your reference photos are used as visual queries against Immich's smart search, and the local classifier re-ranks the results by pet probability. Falls back to text search using your description when no refs exist yet.
 - **Find candidates for "not a pet"**: samples 50 random photos from your library, scores them with the classifier, and shows the ones it is unsure about for bulk review.
 - **Negative samples**: mark photos that look like your pet but aren't, to sharpen the classifier's ability to reject false positives.
 - **Date ranges**: restrict a pet to photos taken within a specific period (useful for pets that have passed away or were adopted later).
@@ -27,7 +27,7 @@ Uses CLIP embeddings and a few reference photos you provide. No cloud services, 
 
 ## Requirements
 
-- Immich running and reachable over HTTP (tested with v2.7.5)
+- Immich running and reachable over HTTP (tested with v3.3.6)
 - Docker (on the same host or any machine that can reach Immich on the network)
 - An Immich API key with the following permissions:
 
@@ -71,7 +71,7 @@ environment:
 
 **Immich on a separate machine:** use its IP or hostname instead (e.g. `http://192.168.1.100:2283`) and change `external: true` to `external: false` at the bottom of `docker-compose.yml`.
 
-### 4. Start the container
+### 3. Start the container
 
 The default configuration runs on CPU, which works for any machine (including ARM64 like Raspberry Pi or Apple Silicon) without extra setup.
 
@@ -84,30 +84,21 @@ If you want GPU acceleration, see [GPU support](#gpu-support) before running.
 
 The first time the app actually needs to detect or classify a photo (a scan, or a UI action like Find suggestions), it downloads the YOLO model (~6 MB) and CLIP model (~350 MB) and saves them to the /data volume. After that, they load from disk and no internet connection is needed. The container must have internet access for this first download.
 
+The image also runs with a read-only root filesystem: all writes (model caches and configuration included) go to the `/data` volume.
 
-### Read-Only Root Filesystem
-
-This image supports running with a read-only root filesystem. All writes (including model caches and configuration) are directed to the /data volume.
-
-### 5. Open the UI
+### 4. Open the UI
 
 Go to **http://localhost:2287** in your browser.
 
-The UI binds to `127.0.0.1` by default, so it is only reachable from the same machine. There is no authentication. To allow access from other devices on your network, or to use a different port, change the port binding in `docker-compose.yml`:
+The UI binds to `127.0.0.1` by default, so it is only reachable from the same machine. There is no authentication. To allow access from other devices or to use a different port, change the port binding in `docker-compose.yml`. Only the first number is the host port, the second (`8000`) must stay as-is:
 
 ```yaml
 ports:
-  - "0.0.0.0:2287:8000"  # accessible from other devices on your network
+  - "0.0.0.0:2287:8000"    # accessible from other devices on your network
+  - "127.0.0.1:9000:8000"  # or: serves on port 9000 instead
 ```
 
-To use a different port, change only the first number. The second number (`8000`) is the container's internal port and must stay as-is:
-
-```yaml
-ports:
-  - "127.0.0.1:9000:8000"  # serves on port 9000 instead
-```
-
-Do not expose this to the internet without putting an authenticated reverse proxy in front of it.
+Do not expose this to the internet, or to a network you don't trust, without putting an authenticated reverse proxy in front of it.
 
 ## Updating
 
@@ -117,8 +108,6 @@ To update to a new version, pull the latest image and restart:
 docker compose pull
 docker compose up -d
 ```
-
-This works for all variants since pre-built images are published for NVIDIA, AMD, and CPU-only.
 
 ---
 
@@ -207,7 +196,7 @@ Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `IMMICH_URL` | `http://immich-server:2283` | Immich URL for container-to-container communication |
 | `IMMICH_EXTERNAL_URL` | `http://localhost:2283` | Immich URL as seen from your browser, used for links |
 | `IMMICH_API_KEY` | required | Immich API key |
-| `TAG_NAME` | *(unset, `immich-pet-tagger` in docker-compose.yml)* | If set, this Immich tag is applied to a photo every time a face is written to it (background scan, manual scan, or enrolling a reference photo from the UI), giving you a review queue in Immich of everything the tagger touched. Change the value to whatever tag name you prefer, use `/` for a nested tag (e.g. `Pets/Review`), or remove the line to disable it. The tag is created on first use if it does not exist. Applied inline with each face, not batched, so a photo shows up under the tag as soon as it is tagged, and removed again if that face is later removed and no other pet's face remains on the photo. Removing the tag from a photo in Immich is safe — Pet Tagger never reads it back. Only applies going forward: enabling it does not retroactively tag photos faced before it was turned on. |
+| `TAG_NAME` | *(unset, `immich-pet-tagger` in docker-compose.yml)* | If set, this Immich tag is applied to every photo the tagger writes a face to (scans or enrolling a reference), giving you a review queue in Immich. Use `/` for a nested tag (e.g. `Pets/Review`), or remove the line to disable it. Created on first use, and removed from a photo again when its last pet face is removed. Removing it yourself in Immich is safe, Pet Tagger never reads it back. Not applied retroactively to photos tagged before it was enabled. |
 | `POLL_INTERVAL` | `3600` | Seconds between background scans. Models are loaded only during a scan and unloaded afterward to save RAM. |
 | `CLIP_MODEL_NAME` | `ViT-B-16` | CLIP model architecture, passed to `open_clip.create_model_and_transforms`. See [open_clip's pretrained list](https://github.com/mlfoundations/open_clip/blob/main/docs/pretrained.md) for valid combinations with `CLIP_PRETRAINED`. Larger models need more RAM/VRAM per `GPU_WORKERS` thread. Embedding caches are namespaced per CLIP/YOLO model combo, so switching is safe and does not affect other models' cached data, but each new combo starts with a cold cache and re-embeds refs and assets on first use. |
 | `CLIP_PRETRAINED` | `openai` | CLIP pretrained weights tag for `CLIP_MODEL_NAME`. |
@@ -218,7 +207,7 @@ Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `YOLO_BATCH_SIZE` | `32` | Max images per YOLO inference batch. Reduce if you hit GPU out-of-memory errors. |
 | `EMBED_CACHE_SIZE` | `5000` | Max number of embeddings kept in the in-memory LRU cache. Older entries are evicted when the limit is reached. |
 | `THRESHOLD` | `0.8` | Min confidence (0–1) to tag a photo, when YOLO found a real crop. |
-| `THRESHOLD_FALLBACK` | same as `THRESHOLD` | Min confidence (0–1) to tag a photo when YOLO found nothing and the whole image was embedded instead of a crop. Defaults to `THRESHOLD`'s value, so it does nothing unless set explicitly. Worth raising above `THRESHOLD`: the tagging accuracy tool has consistently measured this whole-image fallback as a noisier signal than a real crop, a separate, stricter threshold trades a bit of recall on fallback matches for meaningfully fewer false positives. |
+| `THRESHOLD_FALLBACK` | same as `THRESHOLD` | Min confidence (0–1) to tag a photo when YOLO found nothing and the whole image was classified instead of a crop. This fallback is a noisier signal than a real crop, so raising it above `THRESHOLD` trades a bit of recall for fewer false positives. |
 | `YOLO_CONF` | `0.25` (`0.2` in docker-compose.yml) | Min YOLO detection confidence (0–1) to count as a real crop. Lower catches more (small, turned-away, or partially visible pets) but crops get noisier. Below this, tagging falls back to embedding the whole photo instead of a crop. |
 | `IOU_THRESHOLD` | `0.7` | YOLO's NMS IoU threshold (0–1). Overlapping detections whose boxes overlap more than this fraction are merged into one. Lower this if two cuddling/overlapping pets in the same photo are being collapsed into a single detection. |
 | `LONG_REQUEST_TIMEOUT` | `120` | Max seconds for CPU-heavy UI requests (Find missed, Find candidates, Find references). Responses stream keepalive bytes so browsers do not drop idle connections. |
@@ -229,10 +218,8 @@ Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The default setup runs on CPU and requires no extra configuration. A GPU makes scans significantly faster but requires additional setup. Pre-built images are published for CPU (AMD64 and ARM64), NVIDIA (AMD64), and AMD/ROCm (AMD64).
 
-**CPU (default):** no changes needed.
-
 **NVIDIA GPU:** install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on your host, then in `docker-compose.yml`:
-1. Change the image tag to `:latest` (default) or `:cuda-legacy` (Maxwell/Pascal/Volta — see below)
+1. Change the image tag to `:latest` (default) or `:cuda-legacy` (Maxwell/Pascal/Volta, see below)
 2. Uncomment the `deploy:` section
 3. Set `GPU_WORKERS=2`
 
@@ -240,7 +227,7 @@ The default setup runs on CPU and requires no extra configuration. A GPU makes s
 image: ghcr.io/tedornitier/immich-pet-tagger:latest
 ```
 
-The `:latest` image ships PyTorch's CUDA 12.8 wheels and supports Turing, Ampere, Ada Lovelace, Hopper, and Blackwell GPUs (compute capability 7.5–12.0, e.g. RTX 20xx/30xx/40xx/50xx, Tesla T4/A100/H100). Pascal and older are not covered — see the legacy tag.
+The `:latest` image ships PyTorch's CUDA 12.8 wheels and supports Turing, Ampere, Ada Lovelace, Hopper, and Blackwell GPUs (compute capability 7.5–12.0, e.g. RTX 20xx/30xx/40xx/50xx, Tesla T4/A100/H100). Pascal and older are not covered, see the legacy tag.
 
 **NVIDIA legacy GPU (`:cuda-legacy`):** for Maxwell, Pascal, and Volta cards (GTX 9xx/10xx, Tesla P100/V100, compute capability 5.0–7.0). Same setup as above but use the `:cuda-legacy` tag instead:
 
@@ -267,12 +254,10 @@ CPU-only works fine for most home libraries. Expect roughly 10x slower processin
 
 ## Bigger models (optional)
 
-The default models (`YOLO_MODEL_NAME=yolov8n.pt`, `CLIP_MODEL_NAME=ViT-B-16`/`CLIP_PRETRAINED=openai`) are chosen to run comfortably on CPU, including low-power hardware like a Raspberry Pi. If you have GPU headroom and want to trade resources for accuracy, `YOLO_MODEL_NAME=yolov8s.pt` with `CLIP_MODEL_NAME=ViT-L-14`/`CLIP_PRETRAINED=openai` measured ~40% fewer missed tags and ~13% fewer false positives than the defaults on a real library. This is opt-in, not the shipped default, for two reasons:
+The default models (`YOLO_MODEL_NAME=yolov8n.pt`, `CLIP_MODEL_NAME=ViT-B-16`/`CLIP_PRETRAINED=openai`) are chosen to run comfortably on CPU, including low-power hardware like a Raspberry Pi. If you have GPU headroom and want to trade resources for accuracy, `YOLO_MODEL_NAME=yolov8s.pt` with `CLIP_MODEL_NAME=ViT-L-14`/`CLIP_PRETRAINED=openai` measured ~40% fewer missed tags and ~13% fewer false positives than the defaults on my own library (96% tagging accuracy at a 1.4% false-positive rate). This is opt-in, not the shipped default, for two reasons:
 
 - `ViT-L-14` is roughly 4x the parameters/compute of the default `ViT-B-16`, and needs a larger download (~900MB vs ~350MB) plus more RAM/VRAM per `GPU_WORKERS` thread. That conflicts with the project's CPU-friendly default.
 - The accuracy gain was measured on one library with several hundred reference photos per pet. A classifier with very few refs may not benefit as much from the larger embedding space, since there's less data to fit a good decision boundary with.
-
-In my own personal testing I reached 96% tagging accuracy at a 1.4% false-positive rate using this combo (`yolov8s.pt` + `ViT-L-14`/`openai`), versus the defaults.
 
 If you want to try it, set in `docker-compose.yml`:
 
@@ -282,7 +267,7 @@ If you want to try it, set in `docker-compose.yml`:
 - CLIP_PRETRAINED=openai
 ```
 
-Embedding caches are namespaced per model combo, so switching is safe and reversible, it just means a cold cache and re-embedding refs/assets on first use. Use **Tagging accuracy** (📊 icon in the sidebar, or `/accuracy.html`) to compare recall/false-positive rates against your current setup before committing to the switch on a full scan.
+Switching is safe and reversible (see `CLIP_MODEL_NAME` above). Use **Tagging accuracy** (📊 icon in the sidebar, or `/accuracy.html`) to compare recall/false-positive rates against your current setup before committing to the switch on a full scan.
 
 ## Limitations
 
@@ -295,7 +280,7 @@ Embedding caches are namespaced per model combo, so switching is safe and revers
 Immich only shows people with at least one face assigned. Add at least one reference photo and wait for a poll cycle.
 
 **Low accuracy / wrong pet tagged**
-Add more reference photos, add more negative samples, or lower the threshold in `docker-compose.yml`.
+Add more reference photos and more "not a pet" samples, or raise `THRESHOLD` in `docker-compose.yml`. Use **Tagging accuracy** to pick a value.
 
 **Container can't reach Immich**
 Make sure the network name in `docker-compose.yml` matches the output of `docker network ls`.
