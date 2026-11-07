@@ -1053,7 +1053,11 @@ document.getElementById('importDetailModal').addEventListener('click', function(
           localStorage.setItem(CACHE_KEY, JSON.stringify({ version: latest, ts: Date.now() }));
         }
       }
-      if (latest && latest !== current) {
+      // Only when the release is newer: a cached older tag right after updating, or a
+      // dev build ahead of the last release, must not show "update".
+      const parts = v => String(v).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+      const newer = (a, b) => { const x = parts(a), y = parts(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+      if (latest && newer(latest, current)) {
         el.innerHTML = `${current} <a href="https://github.com/tedornitier/immich-pet-tagger/releases/latest" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-weight:600;" title="Update available: ${latest}">↑ update</a>`;
       }
     } catch(_) {}
