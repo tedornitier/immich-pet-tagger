@@ -178,7 +178,7 @@ async def _visual_search(
             if aid and aid not in exclude and aid not in seen:
                 seen.add(aid)
                 candidates.append(a)
-    return candidates
+    return await asyncio.to_thread(imm.drop_foreign_assets, candidates, "visual search")
 
 
 # ---------------------------------------------------------------------------
@@ -665,6 +665,7 @@ async def get_suggestions(name: str, limit: int = 20):
                 raise HTTPException(status_code=resp.status_code, detail=resp.text)
             all_items = resp.json().get("assets", {}).get("items", [])
             candidates = [a for a in all_items if a["id"] not in exclude]
+            candidates = await asyncio.to_thread(imm.drop_foreign_assets, candidates, "text search")
 
     if not candidates:
         return {"assets": []}
@@ -893,7 +894,7 @@ def _benchmark_bucket(asset_type: str, yolo_detected: bool) -> str:
     A strong/weak split by detection confidence was tried and measured worse: at matched
     recall, splitting out a separate 'weak' tier and giving it its own threshold produced
     a higher false-positive rate than just raising the YOLO_CONF floor and using one
-    threshold for every detection (see .claude/decisions.md)."""
+    threshold for every detection."""
     is_video = asset_type == "VIDEO"
     if not yolo_detected:
         return "video_fallback" if is_video else "fallback"

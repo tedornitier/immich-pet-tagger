@@ -23,7 +23,7 @@ THRESHOLD_FALLBACK = float(os.environ.get("THRESHOLD_FALLBACK", THRESHOLD))
 """Separate, optional threshold for whole-image fallback classifications (YOLO found no
 animal to crop). Defaults to THRESHOLD itself, so leaving it unset behaves exactly like
 before this existed. The tagging accuracy tool has consistently measured the fallback
-path as a meaningfully noisier signal than a real crop (see .claude/decisions.md), this
+path as a meaningfully noisier signal than a real crop, this
 lets that be corrected for in live tagging, not just observed in the diagnostic."""
 
 _count_lock = threading.Lock()

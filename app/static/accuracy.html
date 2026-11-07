@@ -163,8 +163,7 @@ function sweepPoints(items) {
     const tt = Math.round(t * 100) / 100;
     const gtHit = countAtLeast(items.gt, tt);
     const extraCount = countAtLeast(items.extra, tt);
-    // False-positive rate relative to ground truth in this bucket (matches the
-    // "extra-rate" convention already used in .claude/decisions.md), not a raw count:
+    // False-positive rate relative to ground truth in this bucket, not a raw count:
     // a bucket with more ground truth naturally sees more absolute false positives,
     // so the rate is what's actually comparable across different YOLO/CLIP configs.
     points.push({
