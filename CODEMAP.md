@@ -287,3 +287,12 @@ Standalone entry point for running one poll cycle in an isolated OS process.
 - `closeImportDetail` L981
 - `backToImportPicker` L982
 - `submitImportPet` L984
+
+## scripts/gen_codemap.py
+Generate CODEMAP.md: an index of functions/classes with line numbers.
+- `first_line(node)` L16
+- `bullet(node, indent)` L21
+- `py_section(src)` L37
+- `js_section(src)` L57
+- `main()` L65
+Constants: ROOT, JS_RE

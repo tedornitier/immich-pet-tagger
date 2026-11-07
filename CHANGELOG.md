@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.9.0
+
+### Features
+- Apple Silicon GPU (MPS) support when running natively on macOS outside Docker. The device is picked automatically (CUDA, then MPS, then CPU). Docker images and CUDA/CPU behavior are unchanged, since Docker on macOS cannot use the Mac GPU (part of #54).
+- A heart button in the sidebar links to the project's support page.
+
+### Fixed
+- Photos owned by another Immich user (partner sharing) are now skipped by the tagging accuracy tool and by "Find references" and "Find missed", like scans already did. The accuracy tool counted correct matches on partner photos as false positives, since those photos can never carry your pet's tags, and the finders could suggest partner photos as references (part of #53).
+- In the low confidence results of a scan, answered photos (ignored, assigned to a pet, or marked "not a pet") are now removed from the view and no longer come back when switching the pet filter. Assigned photos also stopped looking unanswered after a filter switch (part of #56).
+- When Immich smart search failed for every reference photo, "Find references" and "Find missed" showed an empty result instead of an error. They now show the error, and each failed search is logged.
+- "Find references" without references (text search) could come back empty when many photos were already excluded, and it now also leaves out ignored photos.
+- Error messages from the server are shown as plain text instead of raw JSON.
+- The "update" link next to the version showed up whenever the installed version differed from the latest release, including right after updating (while the previous release was still cached) or when running a newer build. It now only shows when the release is actually newer.
+- The scan result now shows how many photos were scanned, and says so when the date range contains no photos.
+- "Find candidates" for "not a pet" said "Classifier is well calibrated" when one random sample had no uncertain photos. It now suggests trying another sample. The "not my pets" wording is now "not a pet" everywhere.
+
 ## v1.8.1
 
 ### Action needed
