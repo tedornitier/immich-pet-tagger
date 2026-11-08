@@ -7,11 +7,12 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from pathlib import Path
 from embedder import load_embed_cache
@@ -34,6 +35,11 @@ log = logging.getLogger("main")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", 3600))
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 LONG_REQUEST_TIMEOUT = int(os.environ.get("LONG_REQUEST_TIMEOUT", 120))
+# Extra origins allowed to send state-changing requests, e.g. "https://pets.example.com".
+# Only needed behind a reverse proxy that rewrites the Host header, for browsers that do
+# not send Sec-Fetch-Site. Comma separated.
+TRUSTED_ORIGINS = {o.strip().rstrip("/").lower() for o in os.environ.get("TRUSTED_ORIGINS", "").split(",") if o.strip()}
+SAFE_METHODS = {"GET"}
 
 
 async def polling_loop():
@@ -66,7 +72,50 @@ async def lifespan(app: FastAPI):
         pass
 
 
+def is_cross_site(method: str, headers) -> bool:
+    """True if a browser sent this state-changing request on behalf of another website.
+
+    Cross-site form posts and no-cors fetches skip the CORS preflight, and FastAPI parses a
+    body without Content-Type as JSON, so without this check any page open in the browser
+    could start scans, change pets or reset them in Immich. Requests without Origin (curl,
+    scripts) are not browser cross-site requests and pass."""
+    if method in SAFE_METHODS:
+        return False
+    site = headers.get("sec-fetch-site")
+    if site == "cross-site":
+        return True
+    # Set by the browser itself, a page cannot forge it. Checked before Origin because some
+    # referrer policies make browsers send "Origin: null" for same-origin form posts, and a
+    # reverse proxy that rewrites Host would break the Origin comparison below.
+    if site in ("same-origin", "none"):
+        return False
+    origin = headers.get("origin")
+    if origin is None:
+        return False
+    if origin == "null":
+        return True
+    origin = origin.rstrip("/").lower()
+    if origin in TRUSTED_ORIGINS:
+        return False
+    # Only host and port are compared, not the scheme: behind a TLS-terminating proxy the
+    # browser is on https while the app itself only sees http.
+    try:
+        netloc = urlsplit(origin).netloc
+    except ValueError:  # malformed Origin, e.g. "http://[::1"
+        return True
+    return netloc != headers.get("host", "").lower()
+
+
 app = FastAPI(title="Immich Pet Tagger", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def block_cross_site_requests(request, call_next):
+    if is_cross_site(request.method, request.headers):
+        log.warning(f"Blocked cross-site {request.method} {request.url.path} (origin: {request.headers.get('origin')})")
+        return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+    return await call_next(request)
+
 
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")

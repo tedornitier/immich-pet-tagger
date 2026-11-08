@@ -100,6 +100,8 @@ ports:
 
 Do not expose this to the internet, or to a network you don't trust, without putting an authenticated reverse proxy in front of it.
 
+Requests that can change something (anything but `GET`) are rejected with `403` when the browser sends them on behalf of another website, so a page open in the same browser cannot start scans or reset pets. Scripts and `curl` (no `Origin` header) are not affected. Behind a reverse proxy, keep the original `Host` header (nginx: `proxy_set_header Host $host;`). If your proxy rewrites it, current browsers still work, and for older ones set `TRUSTED_ORIGINS` to the address you open the UI with.
+
 ## Updating
 
 To update to a new version, pull the latest image and restart:
@@ -211,6 +213,7 @@ Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `YOLO_CONF` | `0.25` (`0.2` in docker-compose.yml) | Min YOLO detection confidence (0–1) to count as a real crop. Lower catches more (small, turned-away, or partially visible pets) but crops get noisier. Below this, tagging falls back to embedding the whole photo instead of a crop. |
 | `IOU_THRESHOLD` | `0.7` | YOLO's NMS IoU threshold (0–1). Overlapping detections whose boxes overlap more than this fraction are merged into one. Lower this if two cuddling/overlapping pets in the same photo are being collapsed into a single detection. |
 | `LONG_REQUEST_TIMEOUT` | `120` | Max seconds for CPU-heavy UI requests (Find missed, Find candidates, Find references). Responses stream keepalive bytes so browsers do not drop idle connections. |
+| `TRUSTED_ORIGINS` | *(unset)* | Comma-separated origins (e.g. `https://pets.example.com`) that may send state-changing requests in addition to the UI's own address. Only needed behind a reverse proxy that rewrites the `Host` header, for browsers that do not send `Sec-Fetch-Site`. |
 
 ---
 
