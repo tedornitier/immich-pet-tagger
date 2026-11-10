@@ -73,11 +73,8 @@ function renderSidebar() {
   if (!pets.length) {
     el.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text3);text-align:center;line-height:1.6;">No pets yet.<br>Add one to get started.</div>';
     showGuide();
-    document.getElementById('refsTitle').textContent = 'No pet selected';
-    document.getElementById('findRefsBtn').style.display = 'none';
-    document.getElementById('addByIdBtn').style.display = 'none';
-    document.getElementById('clearRefsBtn').style.display = 'none';
-    document.getElementById('refsGrid').innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">Add a pet first</div></div>';
+    document.getElementById('petBar').style.display = 'none';
+    setCenterView('results');
     return;
   }
   el.innerHTML = pets.map(p => `
@@ -99,7 +96,7 @@ function showGuide() {
     <div class="guide-steps">
       <div class="guide-step"><div class="guide-step-num">1</div><div class="guide-step-body"><div class="guide-step-title">Add your pet</div><div class="guide-step-desc"><strong>Import from Immich</strong>: use this if Immich already recognizes your pet as a person from its own face detection. This is ideal when the person in Immich contains only photos of that pet, for example if you tagged them manually and are confident the assignments are correct. The tagger does not remove or correct existing Immich face assignments, so any misidentified photos already tagged in Immich will stay tagged. If Immich's recognition was noisy, consider adding your pet manually instead.<ol style="margin:6px 0 6px 16px;padding:0;"><li>Click <strong>↓ Import from Immich</strong> in the sidebar</li><li>Find and click your pet in the grid</li><li>Enter a short description (e.g. <code>orange tabby cat</code>) and an optional date range</li><li>Click <strong>Import</strong>. Up to 20 reference photos are imported automatically.</li></ol><strong>Add manually</strong>: use this if Immich doesn't know your pet yet.<ol style="margin:6px 0 6px 16px;padding:0;"><li>Click <strong>+ Add pet</strong>, fill in the name, a short description (e.g. <code>black labrador dog</code>), and an optional date range</li><li>Click <strong>Create</strong></li></ol>The description is used by Immich's CLIP model to find the first batch of candidate photos. Keep it short: 2–4 descriptive keywords.</div></div></div>
       <div class="guide-step"><div class="guide-step-num">2</div><div class="guide-step-body"><div class="guide-step-title">Add reference photos</div><div class="guide-step-desc">References are what the classifier learns from. Quality matters more than quantity.<ol style="margin:6px 0 6px 16px;padding:0;"><li>Select your pet in the sidebar and click <strong>Find references</strong></li><li>Browse the results. They are ranked by visual similarity to your existing refs, or to your description if no refs exist yet.</li><li>Aim for 20–30 to start; results improve up to around 50. For each photo:<ul style="margin:6px 0 0 16px;padding:0;"><li><strong>Your pet's name</strong> (one button per pet): clear, close-up shot, that pet is the only subject. If the photo shows another of your pets, click that pet's button instead.</li><li><strong>Ignore</strong>: blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again. You can see and restore them in the <strong>Ignored</strong> panel under Not a pet.</li><li><strong>Not a pet</strong>: photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.</li></ul></li></ol>If you already know a specific photo you want to use, click <strong>Add manually</strong> and paste the Immich photo URL or asset ID directly.</div></div></div>
-      <div class="guide-step"><div class="guide-step-num">3</div><div class="guide-step-body"><div class="guide-step-title">Add "not a pet" samples</div><div class="guide-step-desc">These teach the classifier what not to tag: empty rooms, other animals of a different species, ambiguous shots with no clear subject. Without them, the classifier will tag almost anything.<ol style="margin:6px 0 6px 16px;padding:0;"><li>In the <strong>Not a pet</strong> panel (bottom right of the screen), click <strong>Find candidates</strong> to automatically surface more photos that might confuse the classifier</li><li>Select the relevant ones and click <strong>Not a pet</strong></li><li>To add a specific photo directly, click <strong>Add manually</strong> and paste its Immich URL or asset ID</li></ol></div></div></div>
+      <div class="guide-step"><div class="guide-step-num">3</div><div class="guide-step-body"><div class="guide-step-title">Add "not a pet" samples</div><div class="guide-step-desc">These teach the classifier what not to tag: empty rooms, other animals of a different species, ambiguous shots with no clear subject. Without them, the classifier will tag almost anything.<ol style="margin:6px 0 6px 16px;padding:0;"><li>In the <strong>Not a pet</strong> panel (right side of the screen), click <strong>Find candidates</strong> to automatically surface more photos that might confuse the classifier</li><li>Select the relevant ones and click <strong>Not a pet</strong></li><li>To add a specific photo directly, click <strong>Add manually</strong> and paste its Immich URL or asset ID</li></ol></div></div></div>
       <div class="guide-step"><div class="guide-step-num">4</div><div class="guide-step-body"><div class="guide-step-title">Run a test scan</div><div class="guide-step-desc">Start with a recent date so the scan covers fewer photos, making it quicker to review and refine before committing to a full backfill.<ol style="margin:6px 0 6px 16px;padding:0;"><li>In the scan panel at the bottom of the sidebar, set the <strong>From</strong> date 1–2 weeks back</li><li>Click <strong>Scan</strong> and wait for the results</li><li>If <strong>Review N low confidence</strong> appears in the results, click it to see photos the classifier identified as a match but wasn't fully confident about.</li><li>Go through them: add correctly identified ones as references, and click <strong>Ignore</strong> on the rest. Ignored photos won't appear in future results.</li></ol></div></div></div>
       <div class="guide-step"><div class="guide-step-num">5</div><div class="guide-step-body"><div class="guide-step-title">Iterate</div><div class="guide-step-desc">Repeat steps 2–4 a couple of times. Each round of added references and negatives improves accuracy. Results typically stabilize after 2–3 iterations.<br><br>If you want a more precise read on accuracy than eyeballing the scan results, use <strong>Tagging accuracy</strong> (📊 icon in the sidebar, or <code>/accuracy.html</code>): it dry-runs classification over a date range and compares it against your existing Immich tags, showing recall and false-positive rates broken down by pet, photo/video, and detection confidence, and lets you test different thresholds without waiting for a real scan.</div></div></div>
       <div class="guide-step"><div class="guide-step-num">6</div><div class="guide-step-body"><div class="guide-step-title">Run the full backfill</div><div class="guide-step-desc">Once you're happy with the accuracy on the test window:<ol style="margin:6px 0 6px 16px;padding:0;"><li>Set the scan date to the earliest date you want to tag. A good starting point is the date you got your pet.</li><li>Click <strong>Scan</strong> to process all photos in that range</li></ol>After that, the background poller runs every hour (<code>POLL_INTERVAL</code>) and tags new photos automatically. Your pets appear in Immich's <strong>People</strong> section.</div></div></div>
@@ -114,8 +111,13 @@ function clearSearch() {
   selectedCrops.clear(); lastClickedKey = null; updateSelUI();
 }
 
+// The center shows either the active pet's references ('refs') or finder results ('results').
+function setCenterView(view) {
+  document.getElementById('centerPanel').dataset.view = view;
+}
+
 async function selectPet(name) {
-  if (activePet?.name === name) return;
+  if (activePet?.name === name) { setCenterView('refs'); return; }
   if (selectedCrops.size > 0) {
     const ok = confirm(`You have ${selectedCrops.size} selected photo${selectedCrops.size !== 1 ? 's' : ''} not yet assigned. Switch anyway?`);
     if (!ok) return;
@@ -125,9 +127,8 @@ async function selectPet(name) {
   activePet = pets.find(p => p.name === name);
   clearSearch(); renderSidebar();
   document.getElementById('refsTitle').textContent = name;
-  document.getElementById('findRefsBtn').style.display = '';
-  document.getElementById('addByIdBtn').style.display = '';
-  document.getElementById('clearRefsBtn').style.display = '';
+  document.getElementById('petBar').style.display = '';
+  setCenterView('refs');
   await loadRefs(name);
   await loadNegatives();
 }
@@ -144,6 +145,7 @@ async function loadRefs(name) {
 
 function renderRefs(assets) {
   const grid = document.getElementById('refsGrid');
+  document.getElementById('refsViewBtn').textContent = `References (${assets.length})`;
   if (!assets.length) { grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:160px;"><div class="empty-sub">No references yet.<br>Click "Find references" to add some.</div></div>'; return; }
   grid.innerHTML = assets.map(a => {
     const cropArg = a.crop_idx != null ? a.crop_idx : 'null';
@@ -368,6 +370,7 @@ async function submitAddById() {
       negCandidateMode = false; borderlineMode = false; scanLowConfMode = false;
       document.getElementById('scanFilterBtns').style.display = 'none';
       selectedCrops.clear(); lastClickedKey = null; updateSelUI();
+      setCenterView('results');
       document.getElementById('resultsLabel').textContent = `${crops.length} pets detected. Select the one to add as reference`;
       document.getElementById('photoGrid').innerHTML = renderPhotoItems(a, 0.8).join('');
       markGridItems([a]);
@@ -384,6 +387,7 @@ async function viewSuggestions() {
   const pet = activePet;
   if (!pet.description) { toast('Edit this pet and add a description to use this feature', 'error'); return; }
   selectedCrops.clear(); lastClickedKey = null; updateSelUI();
+  setCenterView('results');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
   grid.innerHTML = '<div class="loading" style="grid-column:1/-1">Finding similar photos… this may take a moment</div>';
@@ -410,6 +414,7 @@ async function viewBorderline() {
   if (blPollTimer) { clearInterval(blPollTimer); blPollTimer = null; }
   negCandidateMode = false; borderlineMode = true;
   selectedCrops.clear(); lastClickedKey = null; updateSelUI();
+  setCenterView('results');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
   const petName = activePet.name;
@@ -592,6 +597,7 @@ async function viewNegCandidates() {
   if (negPollTimer) { clearInterval(negPollTimer); negPollTimer = null; }
   negCandidateMode = true;
   selectedCrops.clear(); lastClickedKey = null; updateSelUI();
+  setCenterView('results');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
   grid.innerHTML = '<div class="loading" id="negLoadMsg" style="grid-column:1/-1">Loading…</div>';
@@ -743,6 +749,7 @@ async function viewScanLowConf() {
   negCandidateMode = false; borderlineMode = false;
   selectedCrops.clear(); lastClickedKey = null;
   scanLowConfFilter = null;
+  setCenterView('results');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
   grid.innerHTML = '<div class="loading" style="grid-column:1/-1">Loading low confidence results…</div>';
@@ -925,9 +932,10 @@ async function confirmDeletePet(localOnly) {
     const url = `/api/pets/${encodeURIComponent(name)}` + (localOnly ? '?local_only=true' : '');
     await api(url, { method: 'DELETE' });
     if (activePet?.name === name) {
-      activePet = null;
-      document.getElementById('refsTitle').textContent = 'No pet selected';
-      document.getElementById('refsGrid').innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">Select a pet</div></div>';
+      activePet = null; refsItems = [];
+      document.getElementById('petBar').style.display = 'none';
+      setCenterView('results');
+      showGuide();
     }
     await refreshState();
     toast(localOnly ? `Removed ${name} from Pet Tagger` : `Deleted ${name}. Immich will clean up faces in the background.`, 'success');

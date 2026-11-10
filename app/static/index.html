@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=8">
+<link rel="stylesheet" href="/static/style.css?v=9">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -38,39 +38,40 @@
   </div>
   <div class="main">
     <div class="content">
-      <div class="results-panel">
-        <div class="results-header">
-          <span class="panel-label" id="resultsLabel"></span>
+      <div class="results-panel" id="centerPanel" data-view="results">
+        <div class="refs-header" id="petBar" style="display:none">
+          <span class="panel-label" id="refsTitle"></span>
           <div class="results-actions">
             <div class="tile-zoom" title="Tile size">
               <button class="btn" onclick="changeTileSize(-40)">&minus;</button>
               <button class="btn" onclick="changeTileSize(40)">+</button>
             </div>
-            <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
-            <div id="petBtns" style="display:none; gap:4px;"></div>
-            <button class="btn" id="skipBtn" onclick="skipSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
-            <button class="btn btn-danger" id="addNegBtn" onclick="addSelectedAsNegatives()" style="display:none" title="Photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.">Not a pet</button>
+            <button class="btn" id="refsViewBtn" onclick="setCenterView('refs')" style="font-size:12px; padding:5px 10px;">References (0)</button>
+            <button class="btn btn-primary" id="findRefsBtn" onclick="viewFindRefs()" style="font-size:12px; padding:5px 10px;">Find references</button>
+            <button class="btn" id="addByIdBtn" onclick="openAddById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
+            <button class="btn btn-danger" id="clearRefsBtn" onclick="clearAllRefs()" style="font-size:12px; padding:5px 10px;">Clear all</button>
           </div>
         </div>
-        <div id="scanFilterBtns" style="display:none; gap:6px; flex-wrap:wrap; padding:8px 16px; border-bottom:0.5px solid var(--border);"></div>
-        <div class="photo-grid" id="photoGrid"></div>
+        <div class="photo-grid" id="refsGrid"></div>
+        <div class="results-view">
+          <div class="results-header">
+            <span class="panel-label" id="resultsLabel"></span>
+            <div class="results-actions">
+              <div class="tile-zoom" title="Tile size">
+                <button class="btn" onclick="changeTileSize(-40)">&minus;</button>
+                <button class="btn" onclick="changeTileSize(40)">+</button>
+              </div>
+              <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
+              <div id="petBtns" style="display:none; gap:4px;"></div>
+              <button class="btn" id="skipBtn" onclick="skipSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
+              <button class="btn btn-danger" id="addNegBtn" onclick="addSelectedAsNegatives()" style="display:none" title="Photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.">Not a pet</button>
+            </div>
+          </div>
+          <div id="scanFilterBtns" style="display:none; gap:6px; flex-wrap:wrap; padding:8px 16px; border-bottom:0.5px solid var(--border);"></div>
+          <div class="photo-grid" id="photoGrid"></div>
+        </div>
       </div>
       <div class="refs-panel">
-        <div class="side-sec" data-sec="refs">
-          <div class="refs-header">
-            <span class="sec-toggle" onclick="toggleSec('refs')" style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);" id="refsTitle">No pet selected</span>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button class="btn btn-primary" id="findRefsBtn" onclick="viewFindRefs()" style="display:none; font-size:12px; padding:5px 10px;">Find references</button>
-              <button class="btn" id="addByIdBtn" onclick="openAddById()" style="display:none; font-size:12px; padding:5px 10px;">Add manually</button>
-              <button class="btn btn-danger" id="clearRefsBtn" onclick="clearAllRefs()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
-            </div>
-          </div>
-          <div class="refs-grid" id="refsGrid">
-            <div class="empty" style="grid-column:1/-1; height:200px;">
-              <div class="empty-sub">Select a pet</div>
-            </div>
-          </div>
-        </div>
         <div class="neg-panel side-sec" data-sec="neg">
           <div class="neg-header">
             <span class="sec-toggle" onclick="toggleSec('neg')" style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);">Not a pet <span style="font-weight:400;" id="negCount">0</span></span>
@@ -238,6 +239,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=14"></script>
+<script src="/static/app.js?v=15"></script>
 </body>
 </html>

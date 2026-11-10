@@ -148,7 +148,7 @@ If you already know a specific photo you want to use, click **Add manually** and
 
 These teach the classifier what not to tag: empty rooms, other animals of a different species, ambiguous shots with no clear subject. Without them, the classifier will tag almost anything.
 
-1. In the **Not a pet** panel (bottom right of the screen), click **Find candidates** to automatically surface more photos that might confuse the classifier
+1. In the **Not a pet** panel (right side of the screen), click **Find candidates** to automatically surface more photos that might confuse the classifier
 2. Select the relevant ones and click **Not a pet**
 3. To add a specific photo directly, click **Add manually** and paste its Immich URL or asset ID
 
