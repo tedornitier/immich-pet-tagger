@@ -47,10 +47,9 @@
               <button class="btn" onclick="changeTileSize(40)">+</button>
             </div>
             <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
-            <button class="btn btn-primary" id="assignBtn" onclick="assignSelected()" style="display:none" title="Clear, close-up shot, your pet is the only subject.">Add to pet</button>
+            <div id="petBtns" style="display:none; gap:4px; flex-wrap:wrap;"></div>
             <button class="btn" id="skipBtn" onclick="skipSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
             <button class="btn btn-danger" id="addNegBtn" onclick="addSelectedAsNegatives()" style="display:none" title="Photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.">Not a pet</button>
-            <div id="scanPetBtns" style="display:none; gap:4px; flex-wrap:wrap;"></div>
           </div>
         </div>
         <div id="scanFilterBtns" style="display:none; gap:6px; flex-wrap:wrap; padding:8px 16px; border-bottom:0.5px solid var(--border);"></div>
@@ -231,6 +230,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=12"></script>
+<script src="/static/app.js?v=13"></script>
 </body>
 </html>

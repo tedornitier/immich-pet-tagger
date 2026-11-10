@@ -138,7 +138,7 @@ References are what the classifier learns from. Quality matters more than quanti
 1. Select your pet in the sidebar and click **Find references**
 2. Browse the results. They are ranked by visual similarity to your existing refs, or to your description if no refs exist yet.
 3. Aim for 20–30 to start; results improve up to around 50. For each photo:
-   - **Add to pet**: clear, close-up shot, your pet is the only subject.
+   - **Your pet's name** (one button per pet): clear, close-up shot, that pet is the only subject. If the photo shows another of your pets, click that pet's button instead.
    - **Ignore**: blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.
    - **Not a pet**: photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.
 
