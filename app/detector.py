@@ -11,12 +11,12 @@ import numpy as np
 import torch
 from PIL import Image
 
-from device import pick_device, submit_lock
+from device import inference_workers, pick_device, submit_lock
 
 log = logging.getLogger("detector")
 
 YOLO_BATCH_SIZE = int(os.environ.get("YOLO_BATCH_SIZE", 32))
-YOLO_WORKERS = int(os.environ.get("GPU_WORKERS", 2))
+YOLO_WORKERS = inference_workers()
 YOLO_INPUT_SIZE = int(os.environ.get("YOLO_INPUT_SIZE", 640))
 YOLO_MODEL_NAME = os.environ.get("YOLO_MODEL_NAME", "yolov8n.pt")
 YOLO_CONF = float(os.environ.get("YOLO_CONF", 0.25))

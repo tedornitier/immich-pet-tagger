@@ -16,7 +16,6 @@ services:
       - IMMICH_EXTERNAL_URL=http://localhost:2283 # how your browser reaches Immich
       - TAG_NAME=immich-pet-tagger               # tag applied to every photo the tagger adds a face to, change or remove freely
       - POLL_INTERVAL=3600
-      - GPU_WORKERS=1
       - YOLO_INPUT_SIZE=640
       - THRESHOLD=0.8
       - THRESHOLD_FALLBACK=0.85

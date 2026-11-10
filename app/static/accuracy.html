@@ -236,7 +236,7 @@ function buildCurveCards(curve) {
         <h4>${meta.label}</h4>
         <label class="field">CLIP threshold <input type="number" id="th_${meta.key}" min="0.01" max="1" step="0.01" value="${tierThresholds[meta.key]}"></label>
         <div class="chart-holder"></div>
-        <div class="curve-legend"><span class="recall">— recall %</span> &nbsp; <span class="extra">- - false positive rate %</span></div>
+        <div class="curve-legend"><span class="recall">solid: recall %</span> &nbsp; <span class="extra">dashed: false positive rate %</span></div>
         <div class="curve-hint">Click anywhere on the chart to set this threshold.</div>
         <div class="curve-readout"></div>
       </div>`).join('')}</div>`;

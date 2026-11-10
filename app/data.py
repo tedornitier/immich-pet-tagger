@@ -73,23 +73,97 @@ def save_pet_refs(pet_name: str, refs: list[dict], data_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Negatives
+# Crop entries: {"asset_id": str, "bbox": [x1, y1, x2, y2] | None}
+# A bbox (normalized) marks one detected crop of the photo. bbox None means the
+# whole photo, all its crops. A bare asset id string (legacy format) is read as
+# a whole-photo entry.
 # ---------------------------------------------------------------------------
 
-def load_negative_ids(data_dir: Path) -> list[str]:
+BBOX_MATCH_TOLERANCE = 0.02  # max per-coordinate difference for two bboxes to be the same crop
+
+
+def normalize_crop_entries(raw) -> list[dict]:
+    out = []
+    for item in raw or []:
+        if isinstance(item, str):
+            out.append({"asset_id": item, "bbox": None})
+        elif isinstance(item, dict) and item.get("asset_id"):
+            bbox = item.get("bbox")
+            out.append({"asset_id": item["asset_id"], "bbox": [float(c) for c in bbox] if bbox else None})
+    return out
+
+
+def crop_entry_key(entry: dict) -> tuple:
+    """Stable, hashable and sortable identity of an entry. Whole-photo entries get ()."""
+    bbox = entry.get("bbox")
+    return (entry["asset_id"], tuple(round(c, 4) for c in bbox) if bbox else ())
+
+
+def crop_entry_token(entry: dict) -> str:
+    """String form of crop_entry_key. A whole-photo entry is just its asset id."""
+    aid, bbox = crop_entry_key(entry)
+    return aid + ("@" + ",".join(f"{c:.4f}" for c in bbox) if bbox else "")
+
+
+def merge_crop_entries(existing: list[dict], new: list[dict]) -> list[dict]:
+    """existing followed by the new entries, deduped on crop_entry_key, order kept."""
+    seen: set = set()
+    out = []
+    for e in list(existing) + list(new):
+        k = crop_entry_key(e)
+        if k not in seen:
+            seen.add(k)
+            out.append(e)
+    return out
+
+
+def bboxes_match(a, b, tol: float = BBOX_MATCH_TOLERANCE) -> bool:
+    return bool(a) and bool(b) and len(a) == len(b) and all(abs(x - y) <= tol for x, y in zip(a, b))
+
+
+def index_crop_entries(entries: list[dict]) -> dict[str, list]:
+    """asset_id -> list of entry bboxes (None for a whole-photo entry)."""
+    idx: dict[str, list] = {}
+    for e in entries:
+        idx.setdefault(e["asset_id"], []).append(e.get("bbox"))
+    return idx
+
+
+def whole_photo_ids(index: dict[str, list]) -> set[str]:
+    """Assets with a whole-photo entry, i.e. excluded entirely."""
+    return {aid for aid, bboxes in index.items() if None in bboxes}
+
+
+def crop_entry_matches(index: dict[str, list], asset_id: str, bbox=None) -> bool:
+    """True if the crop (asset_id, bbox) is covered: by a whole-photo entry of the asset,
+    or by a crop entry whose bbox matches. A crop with no bbox (whole-image fallback)
+    only matches a whole-photo entry."""
+    bboxes = index.get(asset_id)
+    if not bboxes:
+        return False
+    if None in bboxes:
+        return True
+    return bbox is not None and any(bboxes_match(bbox, b) for b in bboxes)
+
+
+# ---------------------------------------------------------------------------
+# Negatives (list of crop entries)
+# ---------------------------------------------------------------------------
+
+def load_negatives(data_dir: Path) -> list[dict]:
     path = data_dir / "negatives.json"
     if not path.exists():
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return normalize_crop_entries(json.loads(path.read_text(encoding="utf-8")))
     except Exception as e:
         log.error(f"Corrupted {path}, returning empty negatives: {e}")
         return []
 
 
-def save_negative_ids(ids: list[str], data_dir: Path) -> None:
+def save_negatives(entries: list[dict], data_dir: Path) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write(data_dir / "negatives.json", json.dumps(ids, indent=2))
+    _atomic_write(data_dir / "negatives.json", json.dumps(normalize_crop_entries(entries), indent=2))
 
 
 # ---------------------------------------------------------------------------

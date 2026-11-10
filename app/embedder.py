@@ -18,13 +18,14 @@ import requests
 import torch
 from PIL import Image
 
+import data
 import immich as imm
-from device import is_gpu, pick_device, submit_lock
+from device import inference_workers, is_gpu, pick_device, submit_lock
 
 log = logging.getLogger("embedder")
 
-GPU_WORKERS = int(os.environ.get("GPU_WORKERS", 2))
-_default_scan_workers = GPU_WORKERS * 32 if is_gpu(pick_device()) else 8
+MODEL_WORKERS = inference_workers()
+_default_scan_workers = MODEL_WORKERS * 32 if is_gpu(pick_device()) else 8
 SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", _default_scan_workers))
 CLIP_BATCH_SIZE = int(os.environ.get("CLIP_BATCH_SIZE", 32))
 CLIP_MODEL_NAME = os.environ.get("CLIP_MODEL_NAME", "ViT-B-16")
@@ -170,7 +171,7 @@ def _clip_batch_loop(worker_id: int) -> None:
 def _ensure_clip_workers() -> None:
     with _clip_worker_lock:
         alive = [t for t in _clip_worker_threads if t.is_alive()]
-        for i in range(len(alive), GPU_WORKERS):
+        for i in range(len(alive), MODEL_WORKERS):
             t = threading.Thread(target=_clip_batch_loop, args=(i,), daemon=True, name=f"clip-batch-{i}")
             t.start()
             _clip_worker_threads.append(t)
@@ -396,16 +397,17 @@ def get_crops_and_embed(asset_id: str) -> list[tuple[dict, np.ndarray]]:
 
 
 def embed_crop_by_bbox(asset_id: str, bbox: list) -> np.ndarray | None:
-    """Embed a specific crop by normalized bounding box. Used for crop-centric refs."""
+    """Embed a specific crop by normalized bounding box. Used for crop-centric refs and negatives.
+    Cached under a per-bbox key, so two crops of the same photo (e.g. a ref crop and a
+    "not a pet" crop) never share a vector, and embed_asset_crops' per-asset list is untouched."""
     global _cache_dirty
+    key = data.crop_entry_token({"asset_id": asset_id, "bbox": bbox})
     with _cache_lock:
-        cached = _embed_cache.get(asset_id)
+        cached = _embed_cache.get(key)
         if cached is not None:
-            _embed_cache.move_to_end(asset_id)
+            _embed_cache.move_to_end(key)
     if cached is not None:
-        vecs = cached if isinstance(cached, list) else [cached]
-        if len(vecs) == 1:
-            return vecs[0]
+        return cached
     img = fetch_thumbnail(asset_id)
     if img is None:
         return None
@@ -415,8 +417,8 @@ def embed_crop_by_bbox(asset_id: str, bbox: list) -> np.ndarray | None:
     vec = embed_image(crop_img)
     if vec is not None:
         with _cache_lock:
-            _embed_cache[asset_id] = vec
-            _embed_cache.move_to_end(asset_id)
+            _embed_cache[key] = vec
+            _embed_cache.move_to_end(key)
             if len(_embed_cache) > MAX_EMBED_CACHE_SIZE:
                 _embed_cache.popitem(last=False)
             _cache_dirty = True
@@ -501,8 +503,10 @@ def embed_asset_crops(asset_id: str, require_animal: bool = False) -> list[np.nd
         cached = _embed_cache.get(asset_id)
         if cached is not None:
             _embed_cache.move_to_end(asset_id)
-    if cached is not None:
-        return cached if isinstance(cached, list) else [cached]
+    # A bare vector under the asset id was written by the old embed_crop_by_bbox for one
+    # crop only, so it is not this asset's crop list: recompute and overwrite it.
+    if isinstance(cached, list):
+        return cached
     img = fetch_thumbnail(asset_id)
     if img is None:
         return []

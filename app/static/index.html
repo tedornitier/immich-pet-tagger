@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=6">
+<link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -15,11 +15,14 @@
         <div class="logo">Pet Tagger <span id="versionLabel" style="font-size:11px;font-weight:400;color:var(--text3);vertical-align:middle;text-transform:none;"></span></div>
         <div class="logo-sub">for Immich</div>
       </div>
-      <a class="info-btn support-btn" href="https://github.com/tedornitier/immich-pet-tagger#support" target="_blank" rel="noopener" title="Support Pet Tagger" style="margin-right:6px;"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m8 14.25.345.666a.75.75 0 0 1-.69 0l-.008-.004-.018-.01a7.152 7.152 0 0 1-.31-.17 22.055 22.055 0 0 1-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.066 22.066 0 0 1-3.744 2.584l-.018.01-.006.003h-.002ZM4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.58 20.58 0 0 0 8 13.393a20.58 20.58 0 0 0 3.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.749.749 0 0 1-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5Z"/></svg></a>
-      <a class="info-btn" href="/accuracy.html" title="Tagging accuracy" style="margin-right:6px; text-decoration:none;">&#128202;</a>
-      <button class="info-btn" onclick="showGuide()" title="Getting started">i</button>
+      <div style="display:flex; gap:4px;">
+        <a class="info-btn support-btn" href="https://github.com/tedornitier/immich-pet-tagger#support" target="_blank" rel="noopener" title="Support Pet Tagger"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m8 14.25.345.666a.75.75 0 0 1-.69 0l-.008-.004-.018-.01a7.152 7.152 0 0 1-.31-.17 22.055 22.055 0 0 1-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.066 22.066 0 0 1-3.744 2.584l-.018.01-.006.003h-.002ZM4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.58 20.58 0 0 0 8 13.393a20.58 20.58 0 0 0 3.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.749.749 0 0 1-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5Z"/></svg></a>
+        <a class="info-btn" href="/accuracy.html" title="Tagging accuracy" style="text-decoration:none;">&#128202;</a>
+        <button class="info-btn" onclick="openGuide()" title="Getting started">i</button>
+      </div>
     </div>
     <div class="pets-list" id="petsList"></div>
+    <div class="list-rows" id="listRows"></div>
     <button class="add-pet-btn add-pet-btn-primary" onclick="openAddPet()">+ Add pet</button>
     <button class="add-pet-btn" style="margin-bottom:8px;" onclick="openImportPet()">↓ Import from Immich</button>
     <div class="sidebar-bottom">
@@ -38,48 +41,40 @@
   </div>
   <div class="main">
     <div class="content">
-      <div class="results-panel">
-        <div class="results-header">
-          <span class="panel-label" id="resultsLabel"></span>
+      <div class="center-panel" id="centerPanel" data-view="results">
+        <div class="center-header" id="centerBar" style="display:none">
+          <span class="panel-label" id="centerTitle"></span>
           <div class="results-actions">
             <div class="tile-zoom" title="Tile size">
               <button class="btn" onclick="changeTileSize(-40)">&minus;</button>
               <button class="btn" onclick="changeTileSize(40)">+</button>
             </div>
-            <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
-            <button class="btn btn-primary" id="assignBtn" onclick="assignSelected()" style="display:none" title="Clear, close-up shot, your pet is the only subject.">Add to pet</button>
-            <button class="btn" id="skipBtn" onclick="skipSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
-            <button class="btn btn-danger" id="addNegBtn" onclick="addSelectedAsNegatives()" style="display:none" title="Photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.">Not a pet</button>
-            <div id="scanPetBtns" style="display:none; gap:4px; flex-wrap:wrap;"></div>
+            <button class="btn btn-sm" id="listViewBtn" onclick="setCenterView('list')">References (0)</button>
+            <button class="btn btn-sm btn-primary pet-only" id="findRefsBtn" onclick="viewFindRefs()">Find references</button>
+            <button class="btn btn-sm pet-only" id="addByIdBtn" onclick="openAddById()">Add manually</button>
+            <button class="btn btn-sm btn-danger pet-only" id="clearRefsBtn" onclick="clearAllRefs()">Clear all</button>
+            <button class="btn btn-sm neg-only" id="findNegsBtn" onclick="viewNegCandidates()">Find candidates</button>
+            <button class="btn btn-sm neg-only" id="addNegByIdBtn" onclick="openAddNegById()">Add manually</button>
+            <button class="btn btn-sm btn-danger neg-only" id="clearNegsBtn" onclick="clearAllNegatives()" style="display:none;">Clear all</button>
           </div>
         </div>
-        <div id="scanFilterBtns" style="display:none; gap:6px; flex-wrap:wrap; padding:8px 16px; border-bottom:0.5px solid var(--border);"></div>
-        <div class="photo-grid" id="photoGrid"></div>
-      </div>
-      <div class="refs-panel">
-        <div class="refs-header">
-          <span style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);" id="refsTitle">No pet selected</span>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <button class="btn btn-primary" id="findRefsBtn" onclick="viewFindRefs()" style="display:none; font-size:12px; padding:5px 10px;">Find references</button>
-            <button class="btn" id="addByIdBtn" onclick="openAddById()" style="display:none; font-size:12px; padding:5px 10px;">Add manually</button>
-            <button class="btn btn-danger" id="clearRefsBtn" onclick="clearAllRefs()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
-          </div>
-        </div>
-        <div class="refs-grid" id="refsGrid">
-          <div class="empty" style="grid-column:1/-1; height:200px;">
-            <div class="empty-sub">Select a pet</div>
-          </div>
-        </div>
-        <div class="neg-panel">
-          <div class="neg-header">
-            <span style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);">Not a pet <span style="font-weight:400;" id="negCount">0</span></span>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button class="btn" id="findNegsBtn" onclick="viewNegCandidates()" style="font-size:12px; padding:5px 10px;">Find candidates</button>
-              <button class="btn" id="addNegByIdBtn" onclick="openAddNegById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
-              <button class="btn btn-danger" id="clearNegsBtn" onclick="clearAllNegatives()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
+        <div class="photo-grid" id="listGrid"></div>
+        <div class="results-view">
+          <div class="results-header">
+            <span class="panel-label" id="resultsLabel"></span>
+            <div class="results-actions">
+              <div class="tile-zoom" title="Tile size">
+                <button class="btn" onclick="changeTileSize(-40)">&minus;</button>
+                <button class="btn" onclick="changeTileSize(40)">+</button>
+              </div>
+              <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
+              <div class="pet-btns" id="petBtns"></div>
+              <button class="btn" id="ignoreBtn" onclick="ignoreSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
+              <button class="btn btn-danger" id="addNegBtn" onclick="addSelectedAsNegatives()" style="display:none" title="Photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.">Not a pet</button>
             </div>
           </div>
-          <div class="neg-grid" id="negGrid"></div>
+          <div class="scan-filter-btns" id="scanFilterBtns"></div>
+          <div class="photo-grid" id="photoGrid"></div>
         </div>
       </div>
     </div>
@@ -147,7 +142,7 @@
 </div>
 
 <div class="modal-backdrop" id="deletePetModal">
-  <div class="modal modal-lg">
+  <div class="modal modal-wide">
     <h2>Delete pet</h2>
     <div class="modal-warning" id="deleteWarningText"></div>
     <div style="font-size:12px; color:var(--text2); margin-bottom:8px;" id="deleteLocalOnlyText"></div>
@@ -224,13 +219,13 @@
     <div class="modal-error" id="addByIdError"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeAddById()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitAddById()">Add</button>
+      <button class="btn btn-primary" id="addByIdSubmit" onclick="submitAddById()">Add</button>
     </div>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=23"></script>
 </body>
 </html>

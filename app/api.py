@@ -2,7 +2,6 @@
 All Immich communication happens here; the browser never touches Immich directly."""
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -84,6 +83,11 @@ class CropRef(BaseModel):
     asset_id: str
     crop_idx: Optional[int] = None
     bbox: Optional[list[float]] = None
+
+
+class NegativesBody(BaseModel):
+    asset_ids: list[str] = []  # whole-photo entries ("Add manually", older clients)
+    entries: list[CropRef] = []  # one entry per selected crop, bbox None means the whole photo
 
 
 class PetCropAssets(BaseModel):
@@ -359,18 +363,33 @@ async def delete_pet(name: str, local_only: bool = False):
 # Negatives
 # ---------------------------------------------------------------------------
 
+def _crop_thumb(asset_id: str, bbox) -> str:
+    return f"/api/crop/{asset_id}?bbox={','.join(str(v) for v in bbox)}" if bbox else f"/api/thumb/{asset_id}"
+
+
 @router.get("/negatives")
 async def get_negatives():
-    ids = data.load_negative_ids(DATA_DIR)
-    return {"assets": [{"id": aid, "thumb": f"/api/thumb/{aid}"} for aid in ids], "count": len(ids)}
+    entries = data.load_negatives(DATA_DIR)
+    return {
+        "assets": [{"id": e["asset_id"], "bbox": e["bbox"], "thumb": _crop_thumb(e["asset_id"], e["bbox"])} for e in entries],
+        "count": len(entries),
+    }
+
+
+def _append_negatives(entries: list) -> tuple[list[dict], int]:
+    """Normalize entries, merge them into negatives.json and save. Returns (merged, added)."""
+    existing = data.load_negatives(DATA_DIR)
+    merged = data.merge_crop_entries(existing, data.normalize_crop_entries(entries))
+    data.save_negatives(merged, DATA_DIR)
+    return merged, len(merged) - len(existing)
 
 
 @router.post("/negatives")
-async def add_negatives(body: PetAssets):
-    existing = set(data.load_negative_ids(DATA_DIR))
-    merged = list(existing | set(body.asset_ids))
-    data.save_negative_ids(merged, DATA_DIR)
-    log.info(f"Negatives: {len(merged)} total (+{len(set(body.asset_ids) - existing)} new)")
+async def add_negatives(body: NegativesBody):
+    merged, added = _append_negatives(
+        [{"asset_id": e.asset_id, "bbox": e.bbox} for e in body.entries] + list(body.asset_ids)
+    )
+    log.info(f"Negatives: {len(merged)} total (+{added} new)")
     return {"ok": True, "count": len(merged)}
 
 
@@ -400,10 +419,7 @@ async def add_negatives_batch(body: PetAssets):
     if valid_ids:
         await asyncio.to_thread(warm_cache)
 
-    existing = set(data.load_negative_ids(DATA_DIR))
-    merged = list(existing | set(valid_ids))
-    data.save_negative_ids(merged, DATA_DIR)
-    added = len(set(valid_ids) - existing)
+    merged, added = _append_negatives(valid_ids)
     log.info(f"Negatives batch: {len(merged)} total (+{added} new, {len(invalid_ids)} invalid)")
     return {"ok": True, "count": len(merged), "added": added, "invalid_ids": invalid_ids}
 
@@ -421,15 +437,30 @@ async def clear_pet_refs(name: str):
 
 @router.delete("/negatives/all")
 async def clear_all_negatives():
-    data.save_negative_ids([], DATA_DIR)
+    data.save_negatives([], DATA_DIR)
     log.info("Cleared all negatives (local only)")
     return {"ok": True}
 
 
 @router.delete("/negatives/{asset_id}")
-async def remove_negative(asset_id: str):
-    ids = [i for i in data.load_negative_ids(DATA_DIR) if i != asset_id]
-    data.save_negative_ids(ids, DATA_DIR)
+async def remove_negative(asset_id: str, bbox: Optional[str] = None):
+    """Without bbox, removes every entry of the asset. With bbox=x1,y1,x2,y2, removes only
+    that crop entry. bbox=whole removes only the whole-photo entry."""
+    entries = data.load_negatives(DATA_DIR)
+    if bbox is None:
+        keep = [e for e in entries if e["asset_id"] != asset_id]
+    else:
+        target_bbox = None
+        if bbox != "whole":
+            try:
+                target_bbox = [float(v) for v in bbox.split(",")]
+            except ValueError:
+                target_bbox = []
+            if len(target_bbox) != 4:
+                raise HTTPException(status_code=400, detail="bbox must be x1,y1,x2,y2 or whole")
+        target = data.crop_entry_key({"asset_id": asset_id, "bbox": target_bbox})
+        keep = [e for e in entries if data.crop_entry_key(e) != target]
+    data.save_negatives(keep, DATA_DIR)
     return {"ok": True}
 
 
@@ -437,12 +468,25 @@ async def remove_negative(asset_id: str):
 # Skipped
 # ---------------------------------------------------------------------------
 
+@router.get("/skipped")
+async def get_skipped():
+    ids = data.load_skipped_ids(DATA_DIR)
+    return {"assets": [{"id": aid, "thumb": _crop_thumb(aid, None)} for aid in ids], "count": len(ids)}
+
+
 @router.post("/skipped")
 async def add_skipped(body: PetAssets):
-    existing = set(data.load_skipped_ids(DATA_DIR))
-    merged = list(existing | set(body.asset_ids))
+    existing = data.load_skipped_ids(DATA_DIR)
+    merged = list(dict.fromkeys(existing + body.asset_ids))  # keep order, newest last
     data.save_skipped_ids(merged, DATA_DIR)
     return {"count": len(merged)}
+
+
+@router.delete("/skipped/{asset_id}")
+async def remove_skipped(asset_id: str):
+    ids = [i for i in data.load_skipped_ids(DATA_DIR) if i != asset_id]
+    data.save_skipped_ids(ids, DATA_DIR)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -594,35 +638,26 @@ async def remove_pet_asset(name: str, asset_id: str, crop_idx: Optional[int] = N
 # Ref suggestions
 # ---------------------------------------------------------------------------
 
-def _classifier_fingerprint(pet_names: list[str], refs_per_pet: dict, negative_ids: list[str]) -> str:
-    """Stable hash of the inputs that define a trained classifier."""
-    parts = []
-    for name in sorted(pet_names):
-        parts.append(name + ":" + ",".join(sorted(r["asset_id"] for r in refs_per_pet[name])))
-    parts.append("neg:" + ",".join(sorted(negative_ids)))
-    return hashlib.md5("\n".join(parts).encode()).hexdigest()
-
-
 def _build_classifier_from_config(config: dict):
     """Load all pet refs and return (names, clf, scaler), or None if no pets have refs.
 
     The trained classifier is cached in memory and only rebuilt when the set of
     refs or negatives changes. This avoids re-embedding every ref on each request
     and keeps prediction scores stable between calls."""
-    from classifier import build_classifier
+    from classifier import build_classifier, classifier_fingerprint
     all_pet_names = list(config.keys())
     all_refs = {n: data.load_pet_refs(config[n].get("person_id") or n, DATA_DIR) for n in all_pet_names}
     pet_names = [n for n in all_pet_names if all_refs.get(n)]
     refs_per_pet = {n: all_refs[n] for n in pet_names}
-    negative_ids = data.load_negative_ids(DATA_DIR)
+    negatives = data.load_negatives(DATA_DIR)
 
-    fp = _classifier_fingerprint(pet_names, refs_per_pet, negative_ids)
+    fp = classifier_fingerprint(pet_names, refs_per_pet, negatives)
     with state.classifier_cache_lock:
         cached = state.classifier_cache
         if cached is not None and cached["fingerprint"] == fp:
             return cached["names"], cached["clf"], cached["scaler"]
 
-    result = build_classifier(pet_names, refs_per_pet, negative_ids)
+    result = build_classifier(pet_names, refs_per_pet, negatives)
     if result is None:
         return None
     names, clf, scaler = result
@@ -651,8 +686,9 @@ async def get_suggestions(name: str, limit: int = 20):
 
     ref_ids = data.load_pet_asset_ids(pet_cfg.get("person_id") or name, DATA_DIR)
     ref_set = set(ref_ids)
-    neg_ids = set(data.load_negative_ids(DATA_DIR))
-    exclude = ref_set | neg_ids | set(data.load_skipped_ids(DATA_DIR))
+    # Whole-photo negatives exclude the asset up front, crop negatives only their crop below.
+    neg_index = data.index_crop_entries(data.load_negatives(DATA_DIR))
+    exclude = ref_set | data.whole_photo_ids(neg_index) | set(data.load_skipped_ids(DATA_DIR))
 
     async with httpx.AsyncClient(timeout=30) as client:
         if ref_ids:
@@ -688,6 +724,8 @@ async def get_suggestions(name: str, limit: int = 20):
                 for future in as_completed(futures):
                     a = futures[future]
                     for c, vec in (future.result() or []):
+                        if data.crop_entry_matches(neg_index, a["id"], c["bbox"]):
+                            continue
                         v = np.asarray(vec, dtype=np.float64).reshape(1, -1)
                         prob = float(clf.predict_proba(scaler.transform(v))[0][pet_idx])
                         scored.append((prob, {**_slim_asset(a), "crops": [c]}))
@@ -719,9 +757,10 @@ async def get_borderline(name: str, limit: int = 40):
         raise HTTPException(status_code=400, detail="no_refs")
 
     ref_set = set(ref_ids)
-    neg_ids = set(data.load_negative_ids(DATA_DIR))
+    # Whole-photo negatives exclude the asset up front, crop negatives only their crop below.
+    neg_index = data.index_crop_entries(data.load_negatives(DATA_DIR))
     skipped_ids = set(data.load_skipped_ids(DATA_DIR))
-    exclude = ref_set | neg_ids | skipped_ids
+    exclude = ref_set | data.whole_photo_ids(neg_index) | skipped_ids
 
     async with httpx.AsyncClient(timeout=30) as client:
         candidates = await _visual_search(client, ref_ids, pet_cfg, exclude)
@@ -761,6 +800,8 @@ async def get_borderline(name: str, limit: int = 40):
                         state.borderline_progress["current"] = done
                         a = futures[future]
                         for c, vec in (future.result() or []):
+                            if data.crop_entry_matches(neg_index, a["id"], c["bbox"]):
+                                continue
                             v = np.asarray(vec, dtype=np.float64).reshape(1, -1)
                             pet_prob = float(clf.predict_proba(scaler.transform(v))[0][pet_idx])
                             if LOW <= pet_prob < HIGH:
@@ -1020,7 +1061,9 @@ async def get_neg_candidates(limit: int = 60):
     all_pet_names = list(config.keys())
     all_refs = {n: data.load_pet_refs(config[n].get("person_id") or n, DATA_DIR) for n in all_pet_names}
     all_ref_ids: set[str] = {r["asset_id"] for refs in all_refs.values() for r in refs}
-    neg_ids = set(data.load_negative_ids(DATA_DIR))
+    # Candidates are whole photos (no crops), so any negative entry, crop or whole photo,
+    # excludes its asset here, as before.
+    neg_ids = {e["asset_id"] for e in data.load_negatives(DATA_DIR)}
     skipped_ids = set(data.load_skipped_ids(DATA_DIR))
     exclude = all_ref_ids | neg_ids | skipped_ids
 
@@ -1247,8 +1290,12 @@ async def get_scan_result():
     result = state.manual_scan_result
     if not result:
         return {"status": "none"}
-    skipped = set(data.load_skipped_ids(DATA_DIR)) | set(data.load_negative_ids(DATA_DIR))
-    filtered_count = len({a["asset_id"] for a in (state.scan_low_conf_assets or []) if a["asset_id"] not in skipped})
+    skipped = set(data.load_skipped_ids(DATA_DIR))
+    neg_index = data.index_crop_entries(data.load_negatives(DATA_DIR))
+    filtered_count = len({
+        a["asset_id"] for a in (state.scan_low_conf_assets or [])
+        if a["asset_id"] not in skipped and not data.crop_entry_matches(neg_index, a["asset_id"], a.get("bbox"))
+    })
     counts = {**result.get("counts", {}), "low_confidence": filtered_count}
     return {**result, "counts": counts}
 
@@ -1257,11 +1304,12 @@ async def get_scan_result():
 async def get_scan_low_confidence():
     from poller import THRESHOLD
     config = data.load_config(DATA_DIR)
-    skipped = set(data.load_skipped_ids(DATA_DIR)) | set(data.load_negative_ids(DATA_DIR))
+    skipped = set(data.load_skipped_ids(DATA_DIR))
+    neg_index = data.index_crop_entries(data.load_negatives(DATA_DIR))
     seen: dict = {}
     for a in (state.scan_low_conf_assets or []):
         aid = a["asset_id"]
-        if aid in skipped:
+        if aid in skipped or data.crop_entry_matches(neg_index, aid, a.get("bbox")):
             continue
         if aid not in seen or a["prob"] > seen[aid]["prob"]:
             seen[aid] = a
@@ -1299,13 +1347,27 @@ async def list_immich_people():
 # Thumbnail proxy
 # ---------------------------------------------------------------------------
 
+# Browser caching for proxied images. An asset's thumbnail and a crop of it never change,
+# so grids re-rendered on every pet/list switch come from the browser cache instead of
+# going through Immich again. Person thumbnails can change, so they get a short lifetime.
+# Only successful responses are cacheable, so a failed fetch is retried next time.
+ASSET_IMAGE_CACHE = {"Cache-Control": "private, max-age=604800, immutable"}
+PERSON_IMAGE_CACHE = {"Cache-Control": "private, max-age=3600"}
+CROP_TILE_MAX = 512  # max side in px of a crop sent to the UI
+
+
+def _cache_if_ok(status_code: int, headers: dict) -> dict:
+    return headers if status_code == 200 else {}
+
+
 @router.get("/person-thumb/{person_id}")
 async def person_thumbnail(person_id: str):
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(f"{imm.IMMICH_URL}/api/people/{person_id}/thumbnail", headers=imm.headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code)
-    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"))
+    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"),
+                             headers=PERSON_IMAGE_CACHE)
 
 
 # ---------------------------------------------------------------------------
@@ -1332,11 +1394,21 @@ async def get_asset_crops(asset_id: str):
     return {**_slim_asset(meta), "crops": crops}
 
 
+async def _grid_thumbnail(asset_id: str) -> StreamingResponse:
+    """Immich's small thumbnail (about 250px) for grid tiles. The large preview size is only
+    needed as a source for crops and for embedding (embedder.fetch_thumbnail)."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=thumbnail", headers=imm.headers())
+    if resp.status_code != 200:
+        log.warning(f"Grid thumbnail {asset_id}: Immich returned {resp.status_code}")
+    return StreamingResponse(resp.aiter_bytes(), status_code=resp.status_code,
+                             media_type=resp.headers.get("content-type", "image/jpeg"),
+                             headers=_cache_if_ok(resp.status_code, ASSET_IMAGE_CACHE))
+
+
 @router.get("/thumb/{asset_id}")
 async def thumbnail(asset_id: str):
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=preview", headers=imm.headers())
-    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"))
+    return await _grid_thumbnail(asset_id)
 
 
 @router.get("/crop/{asset_id}")
@@ -1350,15 +1422,15 @@ async def animal_crop(asset_id: str, bbox: str | None = None):
                 if img is None:
                     return None
                 w, h = img.size
-                return img.crop((int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)))
+                crop = img.crop((int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)))
+                crop.thumbnail((CROP_TILE_MAX, CROP_TILE_MAX))  # tiles are small, keep the download light
+                return crop
             crop = await asyncio.to_thread(do_crop)
             if crop is not None:
                 buf = io.BytesIO()
                 crop.save(buf, "JPEG", quality=85)
                 buf.seek(0)
-                return StreamingResponse(buf, media_type="image/jpeg")
-        except Exception:
-            pass
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=preview", headers=imm.headers())
-    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"))
+                return StreamingResponse(buf, media_type="image/jpeg", headers=ASSET_IMAGE_CACHE)
+        except Exception as e:
+            log.warning(f"Crop {asset_id} bbox={bbox} failed, serving full thumbnail: {e}")
+    return await _grid_thumbnail(asset_id)

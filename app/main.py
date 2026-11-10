@@ -13,10 +13,18 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+# Configured before importing app modules, so warnings they log at import time
+# (e.g. a misconfigured MODEL_WORKERS) get the normal format instead of Python's bare fallback.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+
 from pathlib import Path
 from embedder import load_embed_cache
 from api import router as api_router
-from device import pick_device
+from device import inference_workers, pick_device
 import inference
 import detector as det
 import embedder as emb
@@ -24,11 +32,6 @@ import embedder as emb
 BASE_DIR = Path(__file__).resolve().parent
 import state
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-)
 log = logging.getLogger("main")
 
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", 3600))
@@ -38,7 +41,7 @@ LONG_REQUEST_TIMEOUT = int(os.environ.get("LONG_REQUEST_TIMEOUT", 120))
 
 async def polling_loop():
     device = pick_device()
-    log.info(f"Poller started. Interval: {POLL_INTERVAL}s. Data dir: {DATA_DIR}. Device: {device}")
+    log.info(f"Poller started. Interval: {POLL_INTERVAL}s. Data dir: {DATA_DIR}. Device: {device}. Inference workers: {inference_workers()}")
     migrated = False
     while True:
         try:

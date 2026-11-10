@@ -159,12 +159,12 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
 
     log.info(f"Pets: {', '.join(f'{n}({len(refs_per_pet[n])} refs)' for n in pet_names)}")
 
-    negative_ids = data.load_negative_ids(dd)
-    if negative_ids:
-        log.info(f"Loaded {len(negative_ids)} negative samples")
+    negatives = data.load_negatives(dd)
+    if negatives:
+        log.info(f"Loaded {len(negatives)} negative samples")
 
     errors_before = inference.model_error_count()
-    result = clf_mod.build_classifier(pet_names, refs_per_pet, negative_ids)
+    result = clf_mod.build_classifier(pet_names, refs_per_pet, negatives)
     if result is None:
         reason = inference.describe_model_failure(errors_before)
         raise RuntimeError("Could not process any reference photo, so nothing was scanned." + (f" {reason}" if reason else ""))

@@ -5,13 +5,18 @@ detector, embedder, inference, and main all resolve to the same device and agree
 on whether it's a GPU (for worker-count heuristics and cache eviction)."""
 
 import contextlib
+import functools
+import logging
+import os
 import threading
 
 import torch
 
+log = logging.getLogger("device")
+
 # MPS exposes a single Metal command queue that is not safe for concurrent
 # submission from multiple threads. This app runs YOLO and CLIP batch workers on
-# separate threads (and GPU_WORKERS>1 adds more), so simultaneous submissions
+# separate threads (and MODEL_WORKERS>1 adds more), so simultaneous submissions
 # abort the process with "failed assertion ... MTLCommandBufferStatusCommitted".
 # One global lock serializes all GPU work on MPS; CUDA/CPU keep full parallelism.
 _mps_lock = threading.Lock()
@@ -32,6 +37,31 @@ def pick_device() -> str:
 def is_gpu(device: str) -> bool:
     """True for accelerator devices (used to scale worker counts up from the CPU default)."""
     return device in ("cuda", "mps")
+
+
+@functools.lru_cache(maxsize=1)
+def inference_workers() -> int:
+    """Number of YOLO and CLIP worker threads, from MODEL_WORKERS (GPU_WORKERS is the
+    old name, still read as a fallback). Defaults to 2 on GPU, 1 on CPU. Values below 1
+    would start no workers and make every inference request hang until the ready
+    timeout, so they are clamped to 1."""
+    default = 2 if is_gpu(pick_device()) else 1
+    name = "MODEL_WORKERS"
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        name = "GPU_WORKERS"
+        raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        log.warning("%s=%r is not an integer, using %d", name, raw, default)
+        return default
+    if value < 1:
+        log.warning("%s=%d is below 1 (it sets inference threads on CPU too), using 1", name, value)
+        return 1
+    return value
 
 
 def empty_cache(device: str) -> None:
