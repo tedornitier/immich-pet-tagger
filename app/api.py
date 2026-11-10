@@ -2,7 +2,6 @@
 All Immich communication happens here; the browser never touches Immich directly."""
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -377,15 +376,20 @@ async def get_negatives():
     }
 
 
+def _append_negatives(entries: list) -> tuple[list[dict], int]:
+    """Normalize entries, merge them into negatives.json and save. Returns (merged, added)."""
+    existing = data.load_negatives(DATA_DIR)
+    merged = data.merge_crop_entries(existing, data.normalize_crop_entries(entries))
+    data.save_negatives(merged, DATA_DIR)
+    return merged, len(merged) - len(existing)
+
+
 @router.post("/negatives")
 async def add_negatives(body: NegativesBody):
-    existing = data.load_negatives(DATA_DIR)
-    new = data.normalize_crop_entries(
+    merged, added = _append_negatives(
         [{"asset_id": e.asset_id, "bbox": e.bbox} for e in body.entries] + list(body.asset_ids)
     )
-    merged = data.merge_crop_entries(existing, new)
-    data.save_negatives(merged, DATA_DIR)
-    log.info(f"Negatives: {len(merged)} total (+{len(merged) - len(existing)} new)")
+    log.info(f"Negatives: {len(merged)} total (+{added} new)")
     return {"ok": True, "count": len(merged)}
 
 
@@ -415,10 +419,7 @@ async def add_negatives_batch(body: PetAssets):
     if valid_ids:
         await asyncio.to_thread(warm_cache)
 
-    existing = data.load_negatives(DATA_DIR)
-    merged = data.merge_crop_entries(existing, data.normalize_crop_entries(valid_ids))
-    data.save_negatives(merged, DATA_DIR)
-    added = len(merged) - len(existing)
+    merged, added = _append_negatives(valid_ids)
     log.info(f"Negatives batch: {len(merged)} total (+{added} new, {len(invalid_ids)} invalid)")
     return {"ok": True, "count": len(merged), "added": added, "invalid_ids": invalid_ids}
 
@@ -470,7 +471,7 @@ async def remove_negative(asset_id: str, bbox: Optional[str] = None):
 @router.get("/skipped")
 async def get_skipped():
     ids = data.load_skipped_ids(DATA_DIR)
-    return {"assets": [{"id": aid, "thumb": f"/api/thumb/{aid}"} for aid in ids], "count": len(ids)}
+    return {"assets": [{"id": aid, "thumb": _crop_thumb(aid, None)} for aid in ids], "count": len(ids)}
 
 
 @router.post("/skipped")
@@ -637,30 +638,20 @@ async def remove_pet_asset(name: str, asset_id: str, crop_idx: Optional[int] = N
 # Ref suggestions
 # ---------------------------------------------------------------------------
 
-def _classifier_fingerprint(pet_names: list[str], refs_per_pet: dict, negatives: list[dict]) -> str:
-    """Stable hash of the inputs that define a trained classifier."""
-    parts = []
-    for name in sorted(pet_names):
-        parts.append(name + ":" + ",".join(sorted(r["asset_id"] for r in refs_per_pet[name])))
-    # A whole-photo entry's token is its bare asset id, so legacy lists fingerprint as before.
-    parts.append("neg:" + ",".join(sorted(data.crop_entry_token(e) for e in negatives)))
-    return hashlib.md5("\n".join(parts).encode()).hexdigest()
-
-
 def _build_classifier_from_config(config: dict):
     """Load all pet refs and return (names, clf, scaler), or None if no pets have refs.
 
     The trained classifier is cached in memory and only rebuilt when the set of
     refs or negatives changes. This avoids re-embedding every ref on each request
     and keeps prediction scores stable between calls."""
-    from classifier import build_classifier
+    from classifier import build_classifier, classifier_fingerprint
     all_pet_names = list(config.keys())
     all_refs = {n: data.load_pet_refs(config[n].get("person_id") or n, DATA_DIR) for n in all_pet_names}
     pet_names = [n for n in all_pet_names if all_refs.get(n)]
     refs_per_pet = {n: all_refs[n] for n in pet_names}
     negatives = data.load_negatives(DATA_DIR)
 
-    fp = _classifier_fingerprint(pet_names, refs_per_pet, negatives)
+    fp = classifier_fingerprint(pet_names, refs_per_pet, negatives)
     with state.classifier_cache_lock:
         cached = state.classifier_cache
         if cached is not None and cached["fingerprint"] == fp:

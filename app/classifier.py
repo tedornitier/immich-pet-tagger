@@ -1,5 +1,6 @@
 """Logistic regression classifier over CLIP embeddings."""
 
+import hashlib
 import logging
 import random
 
@@ -11,6 +12,16 @@ import data
 import embedder as emb
 
 log = logging.getLogger("classifier")
+
+
+def classifier_fingerprint(pet_names: list[str], refs_per_pet: dict, negatives: list[dict]) -> str:
+    """Stable hash of the inputs that define a trained classifier."""
+    parts = []
+    for name in sorted(pet_names):
+        parts.append(name + ":" + ",".join(sorted(r["asset_id"] for r in refs_per_pet[name])))
+    # A whole-photo entry's token is its bare asset id, so legacy lists fingerprint as before.
+    parts.append("neg:" + ",".join(sorted(data.crop_entry_token(e) for e in negatives)))
+    return hashlib.md5("\n".join(parts).encode()).hexdigest()
 
 
 def build_classifier(

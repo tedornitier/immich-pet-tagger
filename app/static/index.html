@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -41,24 +41,24 @@
   </div>
   <div class="main">
     <div class="content">
-      <div class="results-panel" id="centerPanel" data-view="results">
-        <div class="refs-header" id="petBar" style="display:none">
-          <span class="panel-label" id="refsTitle"></span>
+      <div class="center-panel" id="centerPanel" data-view="results">
+        <div class="center-header" id="centerBar" style="display:none">
+          <span class="panel-label" id="centerTitle"></span>
           <div class="results-actions">
             <div class="tile-zoom" title="Tile size">
               <button class="btn" onclick="changeTileSize(-40)">&minus;</button>
               <button class="btn" onclick="changeTileSize(40)">+</button>
             </div>
-            <button class="btn" id="refsViewBtn" onclick="setCenterView('refs')" style="font-size:12px; padding:5px 10px;">References (0)</button>
-            <button class="btn btn-primary pet-only" id="findRefsBtn" onclick="viewFindRefs()" style="font-size:12px; padding:5px 10px;">Find references</button>
-            <button class="btn pet-only" id="addByIdBtn" onclick="openAddById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
-            <button class="btn btn-danger pet-only" id="clearRefsBtn" onclick="clearAllRefs()" style="font-size:12px; padding:5px 10px;">Clear all</button>
-            <button class="btn neg-only" id="findNegsBtn" onclick="viewNegCandidates()" style="font-size:12px; padding:5px 10px;">Find candidates</button>
-            <button class="btn neg-only" id="addNegByIdBtn" onclick="openAddNegById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
-            <button class="btn btn-danger neg-only" id="clearNegsBtn" onclick="clearAllNegatives()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
+            <button class="btn btn-sm" id="listViewBtn" onclick="setCenterView('list')">References (0)</button>
+            <button class="btn btn-sm btn-primary pet-only" id="findRefsBtn" onclick="viewFindRefs()">Find references</button>
+            <button class="btn btn-sm pet-only" id="addByIdBtn" onclick="openAddById()">Add manually</button>
+            <button class="btn btn-sm btn-danger pet-only" id="clearRefsBtn" onclick="clearAllRefs()">Clear all</button>
+            <button class="btn btn-sm neg-only" id="findNegsBtn" onclick="viewNegCandidates()">Find candidates</button>
+            <button class="btn btn-sm neg-only" id="addNegByIdBtn" onclick="openAddNegById()">Add manually</button>
+            <button class="btn btn-sm btn-danger neg-only" id="clearNegsBtn" onclick="clearAllNegatives()" style="display:none;">Clear all</button>
           </div>
         </div>
-        <div class="photo-grid" id="refsGrid"></div>
+        <div class="photo-grid" id="listGrid"></div>
         <div class="results-view">
           <div class="results-header">
             <span class="panel-label" id="resultsLabel"></span>
@@ -68,12 +68,12 @@
                 <button class="btn" onclick="changeTileSize(40)">+</button>
               </div>
               <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
-              <div id="petBtns" style="display:none; gap:4px;"></div>
-              <button class="btn" id="skipBtn" onclick="skipSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
+              <div class="pet-btns" id="petBtns"></div>
+              <button class="btn" id="ignoreBtn" onclick="ignoreSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
               <button class="btn btn-danger" id="addNegBtn" onclick="addSelectedAsNegatives()" style="display:none" title="Photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.">Not a pet</button>
             </div>
           </div>
-          <div id="scanFilterBtns" style="display:none; gap:6px; flex-wrap:wrap; padding:8px 16px; border-bottom:0.5px solid var(--border);"></div>
+          <div class="scan-filter-btns" id="scanFilterBtns"></div>
           <div class="photo-grid" id="photoGrid"></div>
         </div>
       </div>
@@ -142,7 +142,7 @@
 </div>
 
 <div class="modal-backdrop" id="deletePetModal">
-  <div class="modal modal-lg">
+  <div class="modal modal-wide">
     <h2>Delete pet</h2>
     <div class="modal-warning" id="deleteWarningText"></div>
     <div style="font-size:12px; color:var(--text2); margin-bottom:8px;" id="deleteLocalOnlyText"></div>
@@ -226,6 +226,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=22"></script>
+<script src="/static/app.js?v=23"></script>
 </body>
 </html>

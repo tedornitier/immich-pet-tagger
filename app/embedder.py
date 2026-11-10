@@ -18,6 +18,7 @@ import requests
 import torch
 from PIL import Image
 
+import data
 import immich as imm
 from device import inference_workers, is_gpu, pick_device, submit_lock
 
@@ -400,7 +401,7 @@ def embed_crop_by_bbox(asset_id: str, bbox: list) -> np.ndarray | None:
     Cached under a per-bbox key, so two crops of the same photo (e.g. a ref crop and a
     "not a pet" crop) never share a vector, and embed_asset_crops' per-asset list is untouched."""
     global _cache_dirty
-    key = f"{asset_id}@" + ",".join(f"{c:.4f}" for c in bbox)
+    key = data.crop_entry_token({"asset_id": asset_id, "bbox": bbox})
     with _cache_lock:
         cached = _embed_cache.get(key)
         if cached is not None:

@@ -1,4 +1,4 @@
-let pets = [], activePet = null, activeList = null, listCounts = { neg: 0, skipped: 0 }, selectedCrops = new Map(), refsItems = [], negEntries = [], immichUrl = 'http://localhost:2283', resultsMode = null, resultsGen = 0, lastClickedKey = null, negPollTimer = null, blPollTimer = null, scanLowConfAssets = [], scanLowConfThreshold = 0.8, scanLowConfFilter = null;
+let pets = [], activePet = null, activeList = null, listCounts = { neg: 0, ignored: 0 }, selectedCrops = new Map(), refsItems = [], negEntries = [], immichUrl = 'http://localhost:2283', resultsMode = null, resultsGen = 0, lastClickedKey = null, progressTimer = null, scanLowConfAssets = [], scanLowConfThreshold = 0.8, scanLowConfFilter = null;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -56,13 +56,11 @@ async function refreshState() {
 // Pets
 // ---------------------------------------------------------------------------
 
-async function loadPets(keepActive = false) {
+async function loadPets() {
   try {
     const d = await api('/api/pets');
     pets = d.pets;
-    if (activePet) {
-      activePet = pets.find(p => p.name === activePet.name) || activePet;
-    }
+    if (activePet) setSelection(pets.find(p => p.name === activePet.name) || activePet);
     renderSidebar();
   } catch(e) { toast('Could not load pets: ' + e.message, 'error'); }
 }
@@ -101,10 +99,18 @@ function renderListRows() {
     </div>`).join('');
 }
 
+// The sidebar selection: a pet (an object from pets), a tile list ('neg' | 'ignored'), or
+// nothing (the guide). Every change goes through here so the two can't both be set.
+function setSelection(pet, list = null) {
+  activePet = pet || null;
+  activeList = pet ? null : list;
+  if (!pet) refsItems = [];
+}
+
 // The "i" button: leave the current pet or list, then show the guide on its own.
 function openGuide() {
   if (!leaveSelection()) return;
-  activePet = null; activeList = null; refsItems = [];
+  setSelection(null);
   renderSidebar();
   showGuide();
 }
@@ -112,29 +118,22 @@ function openGuide() {
 function showGuide() {
   resetResults();
   setCenterView('guide');
-  document.getElementById('petBar').style.display = 'none';
-  document.getElementById('resultsLabel').textContent = '';
+  document.getElementById('centerBar').style.display = 'none';
   document.getElementById('photoGrid').innerHTML = `<div class="guide" style="grid-column:1/-1">
     <p style="margin:0 0 12px;">Getting good results takes a few iterations. Start by adding a pet, building up references, and adding some negatives. Run a short test scan, review the results, refine, and repeat until you're satisfied. Then run the full backfill.</p>
     <div class="guide-steps">
-      <div class="guide-step"><div class="guide-step-num">1</div><div class="guide-step-body"><div class="guide-step-title">Add your pet</div><div class="guide-step-desc"><strong>Import from Immich</strong>: use this if Immich already recognizes your pet as a person from its own face detection. This is ideal when the person in Immich contains only photos of that pet, for example if you tagged them manually and are confident the assignments are correct. The tagger does not remove or correct existing Immich face assignments, so any misidentified photos already tagged in Immich will stay tagged. If Immich's recognition was noisy, consider adding your pet manually instead.<ol style="margin:6px 0 6px 16px;padding:0;"><li>Click <strong>↓ Import from Immich</strong> in the sidebar</li><li>Find and click your pet in the grid</li><li>Enter a short description (e.g. <code>orange tabby cat</code>) and an optional date range</li><li>Click <strong>Import</strong>. Up to 20 reference photos are imported automatically.</li></ol><strong>Add manually</strong>: use this if Immich doesn't know your pet yet.<ol style="margin:6px 0 6px 16px;padding:0;"><li>Click <strong>+ Add pet</strong>, fill in the name, a short description (e.g. <code>black labrador dog</code>), and an optional date range</li><li>Click <strong>Create</strong></li></ol>The description is used by Immich's CLIP model to find the first batch of candidate photos. Keep it short: 2–4 descriptive keywords.</div></div></div>
-      <div class="guide-step"><div class="guide-step-num">2</div><div class="guide-step-body"><div class="guide-step-title">Add reference photos</div><div class="guide-step-desc">References are what the classifier learns from. Quality matters more than quantity.<ol style="margin:6px 0 6px 16px;padding:0;"><li>Select your pet in the sidebar and click <strong>Find references</strong></li><li>Browse the results. They are ranked by visual similarity to your existing refs, or to your description if no refs exist yet.</li><li>Aim for 20–30 to start; results improve up to around 50. For each photo:<ul style="margin:6px 0 0 16px;padding:0;"><li><strong>Your pet's name</strong> (one button per pet): clear, close-up shot, that pet is the only subject. If the photo shows another of your pets, click that pet's button instead.</li><li><strong>Ignore</strong>: blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again. You can see and restore them in <strong>Ignored</strong> in the sidebar.</li><li><strong>Not a pet</strong>: photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.</li></ul></li></ol>If you already know a specific photo you want to use, click <strong>Add manually</strong> and paste the Immich photo URL or asset ID directly.</div></div></div>
-      <div class="guide-step"><div class="guide-step-num">3</div><div class="guide-step-body"><div class="guide-step-title">Add "not a pet" samples</div><div class="guide-step-desc">These teach the classifier what not to tag: empty rooms, other animals of a different species, ambiguous shots with no clear subject. Without them, the classifier will tag almost anything.<ol style="margin:6px 0 6px 16px;padding:0;"><li>Click <strong>Not a pet</strong> in the sidebar, then <strong>Find candidates</strong> to automatically surface more photos that might confuse the classifier</li><li>Select the relevant ones and click <strong>Not a pet</strong></li><li>To add a specific photo directly, click <strong>Add manually</strong> and paste its Immich URL or asset ID</li></ol></div></div></div>
-      <div class="guide-step"><div class="guide-step-num">4</div><div class="guide-step-body"><div class="guide-step-title">Run a test scan</div><div class="guide-step-desc">Start with a recent date so the scan covers fewer photos, making it quicker to review and refine before committing to a full backfill.<ol style="margin:6px 0 6px 16px;padding:0;"><li>In the scan panel at the bottom of the sidebar, set the <strong>From</strong> date 1–2 weeks back</li><li>Click <strong>Scan</strong> and wait for the results</li><li>If <strong>Review N low confidence</strong> appears in the results, click it to see photos the classifier identified as a match but wasn't fully confident about.</li><li>Go through them: add correctly identified ones as references, and click <strong>Ignore</strong> on the rest. Ignored photos won't appear in future results.</li></ol></div></div></div>
+      <div class="guide-step"><div class="guide-step-num">1</div><div class="guide-step-body"><div class="guide-step-title">Add your pet</div><div class="guide-step-desc"><strong>Import from Immich</strong>: use this if Immich already recognizes your pet as a person from its own face detection. This is ideal when the person in Immich contains only photos of that pet, for example if you tagged them manually and are confident the assignments are correct. The tagger does not remove or correct existing Immich face assignments, so any misidentified photos already tagged in Immich will stay tagged. If Immich's recognition was noisy, consider adding your pet manually instead.<ol><li>Click <strong>↓ Import from Immich</strong> in the sidebar</li><li>Find and click your pet in the grid</li><li>Enter a short description (e.g. <code>orange tabby cat</code>) and an optional date range</li><li>Click <strong>Import</strong>. Up to 20 reference photos are imported automatically.</li></ol><strong>Add manually</strong>: use this if Immich doesn't know your pet yet.<ol><li>Click <strong>+ Add pet</strong>, fill in the name, a short description (e.g. <code>black labrador dog</code>), and an optional date range</li><li>Click <strong>Create</strong></li></ol>The description is used by Immich's CLIP model to find the first batch of candidate photos. Keep it short: 2–4 descriptive keywords.</div></div></div>
+      <div class="guide-step"><div class="guide-step-num">2</div><div class="guide-step-body"><div class="guide-step-title">Add reference photos</div><div class="guide-step-desc">References are what the classifier learns from. Quality matters more than quantity.<ol><li>Select your pet in the sidebar and click <strong>Find references</strong></li><li>Browse the results. They are ranked by visual similarity to your existing refs, or to your description if no refs exist yet.</li><li>Aim for 20–30 to start; results improve up to around 50. For each photo:<ul><li><strong>Your pet's name</strong> (one button per pet): clear, close-up shot, that pet is the only subject. If the photo shows another of your pets, click that pet's button instead.</li><li><strong>Ignore</strong>: blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again. You can see and restore them in <strong>Ignored</strong> in the sidebar.</li><li><strong>Not a pet</strong>: photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.</li></ul></li></ol>If you already know a specific photo you want to use, click <strong>Add manually</strong> and paste the Immich photo URL or asset ID directly.</div></div></div>
+      <div class="guide-step"><div class="guide-step-num">3</div><div class="guide-step-body"><div class="guide-step-title">Add "not a pet" samples</div><div class="guide-step-desc">These teach the classifier what not to tag: empty rooms, other animals of a different species, ambiguous shots with no clear subject. Without them, the classifier will tag almost anything.<ol><li>Click <strong>Not a pet</strong> in the sidebar, then <strong>Find candidates</strong> to automatically surface more photos that might confuse the classifier</li><li>Select the relevant ones and click <strong>Not a pet</strong></li><li>To add a specific photo directly, click <strong>Add manually</strong> and paste its Immich URL or asset ID</li></ol></div></div></div>
+      <div class="guide-step"><div class="guide-step-num">4</div><div class="guide-step-body"><div class="guide-step-title">Run a test scan</div><div class="guide-step-desc">Start with a recent date so the scan covers fewer photos, making it quicker to review and refine before committing to a full backfill.<ol><li>In the scan panel at the bottom of the sidebar, set the <strong>From</strong> date 1–2 weeks back</li><li>Click <strong>Scan</strong> and wait for the results</li><li>If <strong>Review N low confidence</strong> appears in the results, click it to see photos the classifier identified as a match but wasn't fully confident about.</li><li>Go through them: add correctly identified ones as references, and click <strong>Ignore</strong> on the rest. Ignored photos won't appear in future results.</li></ol></div></div></div>
       <div class="guide-step"><div class="guide-step-num">5</div><div class="guide-step-body"><div class="guide-step-title">Iterate</div><div class="guide-step-desc">Repeat steps 2–4 a couple of times. Each round of added references and negatives improves accuracy. Results typically stabilize after 2–3 iterations.<br><br>If you want a more precise read on accuracy than eyeballing the scan results, use <strong>Tagging accuracy</strong> (📊 icon in the sidebar, or <code>/accuracy.html</code>): it dry-runs classification over a date range and compares it against your existing Immich tags, showing recall and false-positive rates broken down by pet, photo/video, and detection confidence, and lets you test different thresholds without waiting for a real scan.</div></div></div>
-      <div class="guide-step"><div class="guide-step-num">6</div><div class="guide-step-body"><div class="guide-step-title">Run the full backfill</div><div class="guide-step-desc">Once you're happy with the accuracy on the test window:<ol style="margin:6px 0 6px 16px;padding:0;"><li>Set the scan date to the earliest date you want to tag. A good starting point is the date you got your pet.</li><li>Click <strong>Scan</strong> to process all photos in that range</li></ol>After that, the background poller runs every hour (<code>POLL_INTERVAL</code>) and tags new photos automatically. Your pets appear in Immich's <strong>People</strong> section.</div></div></div>
+      <div class="guide-step"><div class="guide-step-num">6</div><div class="guide-step-body"><div class="guide-step-title">Run the full backfill</div><div class="guide-step-desc">Once you're happy with the accuracy on the test window:<ol><li>Set the scan date to the earliest date you want to tag. A good starting point is the date you got your pet.</li><li>Click <strong>Scan</strong> to process all photos in that range</li></ol>After that, the background poller runs every hour (<code>POLL_INTERVAL</code>) and tags new photos automatically. Your pets appear in Immich's <strong>People</strong> section.</div></div></div>
     </div>
   </div>`;
-  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
 }
 
-function clearSearch() {
-  document.getElementById('resultsLabel').textContent = '';
-  document.getElementById('photoGrid').innerHTML = '<div class="empty" style="grid-column:1/-1; height:300px;"><div class="empty-icon">🐾</div><div class="empty-title">Find photos</div><div class="empty-sub">Click "Find references" to get started</div></div>';
-  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
-}
-
-// The center shows either the active pet's references ('refs') or finder results ('results').
+// The center shows the active pet's refs or list's photos ('list'), finder results ('results'),
+// or the guide ('guide').
 function setCenterView(view) {
   document.getElementById('centerPanel').dataset.view = view;
 }
@@ -149,14 +148,38 @@ function leaveSelection() {
   return true;
 }
 
-// Drops the current finder: stops its progress pollers, and bumping resultsGen makes any
-// response still in flight see it is stale and not paint over what is shown now.
+// Drops the current finder: stops its progress poller, clears its results and selection,
+// and bumping resultsGen makes any response still in flight see it is stale and not paint
+// over what is shown now.
 function resetResults() {
   resultsGen++;
   resultsMode = null;
-  if (blPollTimer) { clearInterval(blPollTimer); blPollTimer = null; }
-  if (negPollTimer) { clearInterval(negPollTimer); negPollTimer = null; }
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
   document.getElementById('scanFilterBtns').style.display = 'none';
+  document.getElementById('resultsLabel').textContent = '';
+  document.getElementById('photoGrid').innerHTML = '';
+  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
+}
+
+// Shows a finder's server-side progress in its loading message, until the finder ends
+// (the caller clears the returned timer) or a newer one starts (resultsGen moves on).
+function pollProgress(url, gen) {
+  const timer = progressTimer = setInterval(async () => {
+    if (resultsGen !== gen) { clearInterval(timer); return; }
+    try {
+      const p = await api(url);
+      const el = document.getElementById('resultsLoadMsg');
+      if (!el || resultsGen !== gen) return;
+      if (p.total > 0) el.textContent = `Loading ${Math.round(p.current / p.total * 100)}%…`;
+      else if (p.running) el.textContent = 'Loading…';
+    } catch(_) {}
+  }, 1000);
+  return timer;
+}
+
+// Centered empty state for the results grid. With a title it also gets the paw icon.
+function emptyState(title, sub) {
+  return `<div class="empty" style="grid-column:1/-1;height:200px;">${title ? `<div class="empty-icon">🐾</div><div class="empty-title">${title}</div>` : ''}<div class="empty-sub">${sub}</div></div>`;
 }
 
 // Every finder starts here. mode is 'suggest' | 'borderline' | 'negCandidates' | 'lowConf' |
@@ -164,7 +187,6 @@ function resetResults() {
 function startResults(mode, labelText, loadingText = null) {
   resetResults();
   resultsMode = mode;
-  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
   setCenterView('results');
   document.getElementById('resultsLabel').textContent = labelText;
   if (loadingText != null) document.getElementById('photoGrid').innerHTML = `<div class="loading" id="resultsLoadMsg" style="grid-column:1/-1">${loadingText}</div>`;
@@ -173,35 +195,35 @@ function startResults(mode, labelText, loadingText = null) {
 
 // The center header serves the active pet or the active list; data-kind picks its buttons.
 function showCenterHeader(title, kind) {
-  document.getElementById('refsTitle').textContent = title;
-  const bar = document.getElementById('petBar');
+  document.getElementById('centerTitle').textContent = title;
+  const bar = document.getElementById('centerBar');
   bar.dataset.kind = kind;
   bar.style.display = '';
-  setCenterView('refs');
+  setCenterView('list');
 }
 
 async function selectPet(name) {
-  if (activePet?.name === name) { setCenterView('refs'); return; }
+  if (activePet?.name === name) { setCenterView('list'); return; }
   if (!leaveSelection()) return;
-  activePet = pets.find(p => p.name === name); activeList = null;
-  clearSearch(); renderSidebar();
+  setSelection(pets.find(p => p.name === name));
+  renderSidebar();
   showCenterHeader(name, 'pet');
   await loadRefs(name);
 }
 
 async function selectList(kind) {
-  if (activeList === kind) { setCenterView('refs'); return; }
+  if (activeList === kind) { setCenterView('list'); return; }
   if (!leaveSelection()) return;
-  activePet = null; activeList = kind; refsItems = [];
-  clearSearch(); renderSidebar();
+  setSelection(null, kind);
+  renderSidebar();
   showCenterHeader(TILE_LISTS[kind].title, kind);
-  document.getElementById('refsViewBtn').textContent = TILE_LISTS[kind].title;
-  document.getElementById('refsGrid').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('listViewBtn').textContent = TILE_LISTS[kind].title;
+  document.getElementById('listGrid').innerHTML = '<div class="loading">Loading…</div>';
   await loadTileList(kind);
 }
 
 async function loadRefs(name) {
-  const grid = document.getElementById('refsGrid');
+  const grid = document.getElementById('listGrid');
   grid.innerHTML = '<div class="loading">Loading…</div>';
   try {
     const d = await api(`/api/pets/${encodeURIComponent(name)}/assets`);
@@ -212,18 +234,24 @@ async function loadRefs(name) {
 }
 
 function renderRefs(assets) {
-  const grid = document.getElementById('refsGrid');
-  document.getElementById('refsViewBtn').textContent = `References (${assets.length})`;
+  const grid = document.getElementById('listGrid');
+  document.getElementById('listViewBtn').textContent = `References (${assets.length})`;
   if (!assets.length) { grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:160px;"><div class="empty-sub">No references yet.<br>Click "Find references" to add some.</div></div>'; return; }
-  grid.innerHTML = assets.map(a => {
-    const cropArg = a.crop_idx != null ? a.crop_idx : 'null';
-    return `<div class="ref-thumb">
+  renderTileGrid(grid, assets, a => `removeRef('${a.id}', ${a.crop_idx != null ? a.crop_idx : 'null'})`);
+}
+
+// The .ref-thumb grid of a pet's refs and of the tile lists. removeCall(a) is the onclick
+// code of a tile's remove button. Keeps the scroll position, so removing a tile doesn't jump.
+function renderTileGrid(grid, items, removeCall) {
+  const scrollTop = grid.scrollTop;
+  grid.innerHTML = items.map(a => `
+    <div class="ref-thumb">
       <a href="${immichUrl}/photos/${a.id}" target="_blank" rel="noopener" title="Open in Immich">
         <img src="${a.thumb}" loading="lazy" onerror="this.style.opacity=0.2">
       </a>
-      <button class="ref-remove" onclick="removeRef('${a.id}', ${cropArg})" title="Remove">✕</button>
-    </div>`;
-  }).join('');
+      <button class="ref-remove" onclick="${removeCall(a)}" title="Remove">✕</button>
+    </div>`).join('');
+  grid.scrollTop = scrollTop;
 }
 
 async function removeRef(assetId, cropIdx = null) {
@@ -239,11 +267,8 @@ async function removeRef(assetId, cropIdx = null) {
       if (cropIdx != null) return r.crop_idx !== cropIdx;
       return false;
     });
-    const grid = document.getElementById('refsGrid');
-    const scrollTop = grid.scrollTop;
     renderRefs(refsItems);
-    grid.scrollTop = scrollTop;
-    await refreshState();
+    await loadPets();  // only the ref count changed, refresh it in the sidebar
     toast('Removed');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -435,9 +460,7 @@ async function _submitAddById() {
         : `Added ${result.added} to "not a pet"`;
       toast(msg, invalidCount > 0 ? 'warn' : 'success');
     } catch(e) {
-      let msg = e.message || 'Could not load assets';
-      try { const j = JSON.parse(msg); if (j.detail) msg = j.detail; } catch(_) {}
-      modalError('addByIdError', msg);
+      modalError('addByIdError', e.message || 'Could not load assets');
     }
     return;
   }
@@ -466,9 +489,7 @@ async function _submitAddById() {
       markGridItems([a]);
     }
   } catch(e) {
-    let msg = e.message || 'Could not load asset';
-    try { const j = JSON.parse(msg); if (j.detail) msg = j.detail; } catch(_) {}
-    modalError('addByIdError', msg);
+    modalError('addByIdError', e.message || 'Could not load asset');
   }
 }
 
@@ -484,7 +505,7 @@ async function viewSuggestions() {
     if (resultsGen !== myGen) return;
     label.textContent = `${d.assets.length} photo${d.assets.length !== 1 ? 's' : ''} similar to ${pet.name}`;
     if (!d.assets.length) {
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No suggestions found</div><div class="empty-sub">Add more refs or broaden the date range</div></div>';
+      grid.innerHTML = emptyState('No suggestions found', 'Add more refs or broaden the date range');
       return;
     }
     grid.innerHTML = d.assets.flatMap(a => renderPhotoItems(a, 0.8)).join('');
@@ -492,7 +513,7 @@ async function viewSuggestions() {
   } catch(e) {
     if (resultsGen !== myGen) return;
     label.textContent = 'Failed to load suggestions';
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">${e.message}</div></div>`;
+    grid.innerHTML = emptyState(null, e.message);
     toast('Suggestions error: ' + e.message, 'error');
   }
 }
@@ -504,25 +525,15 @@ async function viewBorderline() {
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
 
-  const timer = blPollTimer = setInterval(async () => {
-    if (resultsGen !== myGen) { clearInterval(timer); return; }
-    try {
-      const p = await api(`/api/pets/${encodeURIComponent(petName)}/borderline/progress`);
-      const el = document.getElementById('resultsLoadMsg');
-      if (!el || resultsGen !== myGen) return;
-      if (p.total > 0) el.textContent = `Loading ${Math.round(p.current / p.total * 100)}%…`;
-      else if (p.running) el.textContent = 'Loading…';
-    } catch(_) {}
-  }, 1000);
+  const timer = pollProgress(`/api/pets/${encodeURIComponent(petName)}/borderline/progress`, myGen);
 
   try {
     const d = await api(`/api/pets/${encodeURIComponent(petName)}/borderline`);
     clearInterval(timer);
     if (resultsGen !== myGen) return;
-    blPollTimer = null;
     label.textContent = `${d.assets.length} photo${d.assets.length !== 1 ? 's' : ''} ${petName} might be missing. Add good ones as refs to improve accuracy.`;
     if (!d.assets.length) {
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No missed photos found</div><div class="empty-sub">The classifier is either very confident or not finding this pet at all</div></div>';
+      grid.innerHTML = emptyState('No missed photos found', 'The classifier is either very confident or not finding this pet at all');
       return;
     }
     const thr = d.threshold ?? 0.8;
@@ -531,9 +542,8 @@ async function viewBorderline() {
   } catch(e) {
     clearInterval(timer);
     if (resultsGen !== myGen) return;
-    blPollTimer = null;
     label.textContent = 'Failed to load missed photos';
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">${e.message}</div></div>`;
+    grid.innerHTML = emptyState(null, e.message);
     toast('Error: ' + e.message, 'error');
   }
 }
@@ -570,11 +580,11 @@ function updateSelUI() {
   const showPets = n && resultsMode !== 'negCandidates' && pets.length;
   if (showPets) renderPetBtns();
   document.getElementById('petBtns').style.display = showPets ? 'flex' : 'none';
-  document.getElementById('skipBtn').style.display = n ? '' : 'none';
+  document.getElementById('ignoreBtn').style.display = n ? '' : 'none';
   document.getElementById('addNegBtn').style.display = n ? '' : 'none';
 }
 
-async function skipSelected() {
+async function ignoreSelected() {
   if (!selectedCrops.size) return;
   const ids = [...new Set([...selectedCrops.values()].map(c => c.asset_id))];
   try {
@@ -599,7 +609,7 @@ const TILE_LISTS = {
     removeQuery: a => '?bbox=' + (a.bbox ? a.bbox.join(',') : 'whole'),
     onLoad: assets => { negEntries = assets.map(a => ({ asset_id: a.id, bbox: a.bbox ?? null })); markNegTiles(); },
   },
-  skipped: {
+  ignored: {
     path: '/api/skipped', title: 'Ignored', glyph: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M3.8 12.2l8.4-8.4"/></svg>', label: 'ignored',
     empty: 'No ignored photos', newestFirst: true,
     removedMsg: 'Removed from ignored. It can appear in suggestions again.',
@@ -608,7 +618,7 @@ const TILE_LISTS = {
 
 async function loadTileList(kind) {
   const L = TILE_LISTS[kind];
-  const grid = document.getElementById('refsGrid');
+  const grid = document.getElementById('listGrid');
   try {
     const d = await api(L.path);
     const assets = L.newestFirst ? [...d.assets].reverse() : d.assets;
@@ -617,15 +627,9 @@ async function loadTileList(kind) {
     renderListRows();
     if (L.clearBtn) document.getElementById(L.clearBtn).style.display = d.assets.length ? '' : 'none';
     if (activeList !== kind) return;
-    document.getElementById('refsViewBtn').textContent = `${L.title} (${d.assets.length})`;
+    document.getElementById('listViewBtn').textContent = `${L.title} (${d.assets.length})`;
     if (!assets.length) { grid.innerHTML = L.empty ? `<div class="tile-empty">${L.empty}</div>` : ''; return; }
-    grid.innerHTML = assets.map(a => `
-      <div class="ref-thumb">
-        <a href="${immichUrl}/photos/${a.id}" target="_blank" rel="noopener" title="Open in Immich">
-          <img src="${a.thumb}" loading="lazy" onerror="this.style.opacity=0.2">
-        </a>
-        <button class="ref-remove" onclick="removeTile('${kind}','${a.id}','${L.removeQuery ? L.removeQuery(a) : ''}')" title="Remove">✕</button>
-      </div>`).join('');
+    renderTileGrid(grid, assets, a => `removeTile('${kind}','${a.id}','${L.removeQuery ? L.removeQuery(a) : ''}')`);
   } catch(e) {
     console.warn('loadTileList ' + kind + ':', e);
     if (activeList === kind) grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-sub">Error loading ${escapeHtml(L.label)}</div></div>`;
@@ -633,7 +637,7 @@ async function loadTileList(kind) {
 }
 
 function loadNegatives() { return loadTileList('neg'); }
-function loadIgnored() { return loadTileList('skipped'); }
+function loadIgnored() { return loadTileList('ignored'); }
 
 async function removeTile(kind, id, query = '') {
   const L = TILE_LISTS[kind];
@@ -663,25 +667,15 @@ async function viewNegCandidates() {
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
 
-  const timer = negPollTimer = setInterval(async () => {
-    if (resultsGen !== myGen) { clearInterval(timer); return; }
-    try {
-      const p = await api('/api/suggestions/negatives/progress');
-      const el = document.getElementById('resultsLoadMsg');
-      if (!el || resultsGen !== myGen) return;
-      if (p.total > 0) el.textContent = `Loading ${Math.round(p.current / p.total * 100)}%…`;
-      else if (p.running) el.textContent = 'Loading…';
-    } catch(_) {}
-  }, 1000);
+  const timer = pollProgress('/api/suggestions/negatives/progress', myGen);
 
   try {
     const d = await api('/api/suggestions/negatives');
     clearInterval(timer);
     if (resultsGen !== myGen) return;
-    negPollTimer = null;
     label.textContent = `${d.assets.length} candidate${d.assets.length !== 1 ? 's' : ''} for "not a pet"`;
     if (!d.assets.length) {
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No candidates found</div><div class="empty-sub">No uncertain photos in this random sample. Click "Find candidates" again to try another sample.</div></div>';
+      grid.innerHTML = emptyState('No candidates found', 'No uncertain photos in this random sample. Click "Find candidates" again to try another sample.');
       return;
     }
     const thr = d.threshold || 0.8;
@@ -690,9 +684,8 @@ async function viewNegCandidates() {
   } catch(e) {
     clearInterval(timer);
     if (resultsGen !== myGen) return;
-    negPollTimer = null;
     label.textContent = 'Failed to load candidates';
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">${e.message}</div></div>`;
+    grid.innerHTML = emptyState(null, e.message);
     toast('Error: ' + e.message, 'error');
   }
 }
@@ -728,15 +721,6 @@ function fmtDate(iso) {
   if (!iso) return '';
   const [y, m, d] = iso.slice(0, 10).split('-');
   return new Date(+y, m - 1, +d).toLocaleDateString();
-}
-
-
-function relativeTime(iso) {
-  const diff = Math.floor((Date.now() - new Date(iso)) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 
@@ -814,7 +798,7 @@ async function viewScanLowConf() {
     scanLowConfThreshold = d.threshold ?? 0.8;
     if (!d.assets.length) {
       label.textContent = 'No low confidence results';
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1; height:200px;"><div class="empty-sub">All results were confident or unknown</div></div>';
+      grid.innerHTML = emptyState(null, 'All results were confident or unknown');
       return;
     }
     renderScanLowConfFilterBtns();
@@ -822,7 +806,7 @@ async function viewScanLowConf() {
   } catch(e) {
     if (resultsGen !== myGen) return;
     label.textContent = 'Failed to load';
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1; height:200px;"><div class="empty-sub">${e.message}</div></div>`;
+    grid.innerHTML = emptyState(null, e.message);
   }
 }
 
@@ -839,7 +823,7 @@ function renderScanLowConfFilterBtns() {
   el.style.display = petNames.length > 1 ? 'flex' : 'none';
 }
 
-// Answered low confidence results (skipped, assigned, not a pet) leave the list, so
+// Answered low confidence results (ignored, assigned, not a pet) leave the list, so
 // switching the pet filter re-renders without them and the filter counts stay right.
 function dropScanLowConf(assetIds) {
   if (resultsMode !== 'lowConf') return;
@@ -917,7 +901,7 @@ async function submitAddPet() {
   try {
     await api('/api/pets', { method: 'POST', body: { name, description, since: sinceRaw || null, until: untilRaw || null } });
     closeModal();
-    await loadPets(true);
+    await loadPets();
     await selectPet(name);
     toast(`Created ${name}`, 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
@@ -957,12 +941,12 @@ async function submitEditPet() {
     closeEditModal();
     if (prevActiveName) {
       // Reselect the active pet (under its new name if it was the one edited).
-      activePet = null; clearSearch();
-      await loadPets(true);
+      setSelection(null); resetResults();
+      await loadPets();
       await selectPet(prevActiveName === editedName ? name : prevActiveName);
     } else {
       // A list or the guide is open: keep it, just refresh the sidebar.
-      await loadPets(true);
+      await loadPets();
     }
     toast('Saved', 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
@@ -990,7 +974,7 @@ async function confirmDeletePet(localOnly) {
     const url = `/api/pets/${encodeURIComponent(name)}` + (localOnly ? '?local_only=true' : '');
     await api(url, { method: 'DELETE' });
     if (activePet?.name === name) {
-      activePet = null; refsItems = [];
+      setSelection(null);
       showGuide();
     }
     await refreshState();
@@ -1041,7 +1025,7 @@ function renderImportPeople(people) {
   grid.innerHTML = people.map(p => `
     <div class="person-card${petPersonIds.has(p.id) ? ' already-added' : ''}" data-pid="${p.id}" onclick="handlePersonCardClick(this)">
       <img class="person-thumb" src="/api/person-thumb/${p.id}" onerror="this.style.opacity=0.2" loading="lazy" alt="">
-      <span class="person-name-label">${escapeHtml(p.name || '—')}</span>
+      <span class="person-name-label">${escapeHtml(p.name || '(unnamed)')}</span>
     </div>`).join('');
 }
 
