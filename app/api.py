@@ -1356,13 +1356,26 @@ async def list_immich_people():
 # Thumbnail proxy
 # ---------------------------------------------------------------------------
 
+# Browser caching for proxied images. An asset's thumbnail and a crop of it never change,
+# so grids re-rendered on every pet/list switch come from the browser cache instead of
+# going through Immich again. Person thumbnails can change, so they get a short lifetime.
+# Only successful responses are cacheable, so a failed fetch is retried next time.
+ASSET_IMAGE_CACHE = {"Cache-Control": "private, max-age=604800, immutable"}
+PERSON_IMAGE_CACHE = {"Cache-Control": "private, max-age=3600"}
+
+
+def _cache_if_ok(status_code: int, headers: dict) -> dict:
+    return headers if status_code == 200 else {}
+
+
 @router.get("/person-thumb/{person_id}")
 async def person_thumbnail(person_id: str):
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(f"{imm.IMMICH_URL}/api/people/{person_id}/thumbnail", headers=imm.headers())
     if resp.status_code != 200:
         raise HTTPException(status_code=resp.status_code)
-    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"))
+    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"),
+                             headers=PERSON_IMAGE_CACHE)
 
 
 # ---------------------------------------------------------------------------
@@ -1393,7 +1406,9 @@ async def get_asset_crops(asset_id: str):
 async def thumbnail(asset_id: str):
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=preview", headers=imm.headers())
-    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"))
+    return StreamingResponse(resp.aiter_bytes(), status_code=resp.status_code,
+                             media_type=resp.headers.get("content-type", "image/jpeg"),
+                             headers=_cache_if_ok(resp.status_code, ASSET_IMAGE_CACHE))
 
 
 @router.get("/crop/{asset_id}")
@@ -1413,9 +1428,11 @@ async def animal_crop(asset_id: str, bbox: str | None = None):
                 buf = io.BytesIO()
                 crop.save(buf, "JPEG", quality=85)
                 buf.seek(0)
-                return StreamingResponse(buf, media_type="image/jpeg")
+                return StreamingResponse(buf, media_type="image/jpeg", headers=ASSET_IMAGE_CACHE)
         except Exception:
             pass
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=preview", headers=imm.headers())
-    return StreamingResponse(resp.aiter_bytes(), media_type=resp.headers.get("content-type", "image/jpeg"))
+    return StreamingResponse(resp.aiter_bytes(), status_code=resp.status_code,
+                             media_type=resp.headers.get("content-type", "image/jpeg"),
+                             headers=_cache_if_ok(resp.status_code, ASSET_IMAGE_CACHE))
