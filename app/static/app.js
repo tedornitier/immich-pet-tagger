@@ -90,6 +90,7 @@ function renderSidebar() {
 }
 
 function showGuide() {
+  setCenterView('results');
   document.getElementById('resultsLabel').textContent = '';
   document.getElementById('photoGrid').innerHTML = `<div class="guide" style="grid-column:1/-1">
     <p style="margin:0 0 12px;">Getting good results takes a few iterations. Start by adding a pet, building up references, and adding some negatives. Run a short test scan, review the results, refine, and repeat until you're satisfied. Then run the full backfill.</p>
