@@ -21,11 +21,11 @@ DATA_DIR = Path("/data")
 CACHE_FILE = DATA_DIR / "debug_clf_cache.pkl"
 
 
-def _fingerprint(pet_names, refs_per_pet, negative_ids):
+def _fingerprint(pet_names, refs_per_pet, negatives):
     parts = []
     for name in sorted(pet_names):
         parts.append(name + ":" + ",".join(sorted(r["asset_id"] for r in refs_per_pet[name])))
-    parts.append("neg:" + ",".join(sorted(negative_ids)))
+    parts.append("neg:" + ",".join(sorted(data.crop_entry_token(e) for e in negatives)))
     return hashlib.md5("\n".join(parts).encode()).hexdigest()
 
 
@@ -37,9 +37,9 @@ def load_or_build_classifier():
         for n in pet_names
     }
     pet_names = [n for n in pet_names if refs_per_pet.get(n)]
-    negative_ids = data.load_negative_ids(DATA_DIR)
+    negatives = data.load_negatives(DATA_DIR)
 
-    fp = _fingerprint(pet_names, refs_per_pet, negative_ids)
+    fp = _fingerprint(pet_names, refs_per_pet, negatives)
 
     if CACHE_FILE.exists():
         cached = pickle.loads(CACHE_FILE.read_bytes())
@@ -48,7 +48,7 @@ def load_or_build_classifier():
             return cached["names"], cached["clf"], cached["scaler"]
 
     print("Building classifier...")
-    result = clf_mod.build_classifier(pet_names, refs_per_pet, negative_ids)
+    result = clf_mod.build_classifier(pet_names, refs_per_pet, negatives)
     if result is None:
         print("Could not build classifier.")
         sys.exit(1)

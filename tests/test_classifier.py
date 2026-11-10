@@ -17,7 +17,7 @@ NEG_VECS  = [_unit_vec(i + 200) for i in range(20)]
 
 CAT_REFS  = [{"asset_id": f"cat_{i}"} for i in range(10)]
 DOG_REFS  = [{"asset_id": f"dog_{i}"} for i in range(10)]
-NEG_IDS   = [f"neg_{i}" for i in range(20)]
+NEG_IDS   = [{"asset_id": f"neg_{i}", "bbox": None} for i in range(20)]
 
 
 def _mock_embed(asset_id, require_animal=False):
@@ -140,3 +140,28 @@ def test_asset_in_range_before_since():
 
 def test_asset_in_range_after_until():
     assert asset_in_range("2025-01-01T00:00:00Z", None, "2024-12-31") is False
+
+
+def test_build_classifier_crop_negative_embeds_only_that_crop():
+    """A crop negative goes through embed_crop_by_bbox, never the whole-photo path, so the
+    other crops of the photo (e.g. the user's pet) are not trained as unknown."""
+    refs = {"cat": CAT_REFS}
+    negs = [{"asset_id": "mixed", "bbox": [0.1, 0.1, 0.4, 0.4]}]
+    with patch("classifier.emb.embed_asset_crops", side_effect=_mock_embed) as whole, \
+         patch("classifier.emb.embed_crop_by_bbox", return_value=NEG_VECS[0]) as crop:
+        result = clf_mod.build_classifier(["cat"], refs, negs)
+    assert result is not None
+    crop.assert_called_once_with("mixed", [0.1, 0.1, 0.4, 0.4])
+    assert all(c.args[0] != "mixed" for c in whole.call_args_list)
+
+
+def test_build_classifier_subsampling_is_deterministic_with_entries():
+    refs = {"cat": CAT_REFS[:2]}  # target 6 negatives out of 20
+    seen = []
+    for order in (NEG_IDS, list(reversed(NEG_IDS))):
+        with patch("classifier.emb.embed_asset_crops", side_effect=_mock_embed) as whole, \
+             patch("classifier.emb.embed_crop_by_bbox", return_value=None):
+            clf_mod.build_classifier(["cat"], refs, order)
+        seen.append(sorted(c.args[0] for c in whole.call_args_list if c.args[0].startswith("neg_")))
+    assert len(seen[0]) == 6
+    assert seen[0] == seen[1]

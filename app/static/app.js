@@ -1,4 +1,4 @@
-let pets = [], activePet = null, selectedCrops = new Map(), refsItems = [], negIds = [], immichUrl = 'http://localhost:2283', negCandidateMode = false, borderlineMode = false, scanLowConfMode = false, lastClickedKey = null, negGeneration = 0, negPollTimer = null, blGeneration = 0, blPollTimer = null, scanLowConfAssets = [], scanLowConfThreshold = 0.8, scanLowConfFilter = null;
+let pets = [], activePet = null, selectedCrops = new Map(), refsItems = [], negEntries = [], immichUrl = 'http://localhost:2283', negCandidateMode = false, borderlineMode = false, scanLowConfMode = false, lastClickedKey = null, negGeneration = 0, negPollTimer = null, blGeneration = 0, blPollTimer = null, scanLowConfAssets = [], scanLowConfThreshold = 0.8, scanLowConfFilter = null;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -250,15 +250,29 @@ function renderPhotoItems(a, thr) {
 
 function markGridItems(assets) {
   const refKeys = new Set(refsItems.map(r => r.crop_idx != null ? `${r.id}_${r.crop_idx}` : r.id));
-  const negSet = new Set(negIds);
   assets.forEach(a => {
     const keys = (a.crops && a.crops.length > 0) ? a.crops.map(c => `${a.id}_${c.crop_idx}`) : [a.id];
     keys.forEach(key => {
       const el = document.getElementById('th-' + key);
       if (!el) return;
       if (refKeys.has(key) || refKeys.has(a.id)) el.classList.add('is-ref');
-      if (negSet.has(a.id)) el.classList.add('is-neg');
     });
+  });
+  markNegTiles();
+}
+
+// "Not a pet" entries are {asset_id, bbox}: bbox null covers every crop of the photo, a bbox
+// only that crop. Mirrors data.crop_entry_matches on the server (same 0.02 tolerance).
+function bboxesMatch(a, b) {
+  return !!a && !!b && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= 0.02);
+}
+function isNegCrop(assetId, bbox) {
+  return negEntries.some(e => e.asset_id === assetId && (e.bbox == null || bboxesMatch(e.bbox, bbox)));
+}
+function markNegTiles() {
+  document.querySelectorAll('#photoGrid .photo-thumb').forEach(el => {
+    const c = getCropData(el);
+    el.classList.toggle('is-neg', isNegCrop(c.asset_id, c.bbox));
   });
 }
 
@@ -523,7 +537,7 @@ applyCollapsed();
 
 function updateNegStatus() {
   const el = document.getElementById('negCount');
-  el.textContent = negIds.length;
+  el.textContent = negEntries.length;
   el.style.color = '';
 }
 
@@ -531,8 +545,9 @@ function updateNegStatus() {
 const TILE_LISTS = {
   neg: {
     path: '/api/negatives', grid: 'negGrid', count: 'negCount', clearBtn: 'clearNegsBtn', label: 'not a pet',
-    setIds: ids => { negIds = ids; },
-    afterRemove: id => document.getElementById('th-' + id)?.classList.remove('is-neg'),
+    // The ✕ removes exactly that entry: one crop, or the whole-photo entry.
+    removeQuery: a => '?bbox=' + (a.bbox ? a.bbox.join(',') : 'whole'),
+    onLoad: assets => { negEntries = assets.map(a => ({ asset_id: a.id, bbox: a.bbox ?? null })); markNegTiles(); },
   },
   skipped: {
     path: '/api/skipped', grid: 'ignoredGrid', count: 'ignoredCount', label: 'ignored',
@@ -546,7 +561,7 @@ async function loadTileList(kind) {
   try {
     const d = await api(L.path);
     const assets = L.newestFirst ? [...d.assets].reverse() : d.assets;
-    L.setIds?.(d.assets.map(a => a.id));
+    L.onLoad?.(d.assets);
     const countEl = document.getElementById(L.count);
     countEl.textContent = d.assets.length;
     countEl.style.color = '';
@@ -558,7 +573,7 @@ async function loadTileList(kind) {
         <a href="${immichUrl}/photos/${a.id}" target="_blank" rel="noopener" title="Open in Immich">
           <img src="${a.thumb}" loading="lazy" onerror="this.style.opacity=0.2">
         </a>
-        <button class="ref-remove" onclick="removeTile('${kind}','${a.id}')" title="Remove">✕</button>
+        <button class="ref-remove" onclick="removeTile('${kind}','${a.id}','${L.removeQuery ? L.removeQuery(a) : ''}')" title="Remove">✕</button>
       </div>`).join('');
   } catch(e) { console.warn('loadTileList ' + kind + ':', e); }
 }
@@ -566,11 +581,10 @@ async function loadTileList(kind) {
 function loadNegatives() { return loadTileList('neg'); }
 function loadIgnored() { return loadTileList('skipped'); }
 
-async function removeTile(kind, id) {
+async function removeTile(kind, id, query = '') {
   const L = TILE_LISTS[kind];
   try {
-    await api(`${L.path}/${id}`, { method: 'DELETE' });
-    L.afterRemove?.(id);
+    await api(`${L.path}/${id}${query}`, { method: 'DELETE' });
     await loadTileList(kind);
     toast(L.removedMsg || `Removed from "${L.label}"`);
   } catch(e) { toast('Error: ' + e.message, 'error'); }
@@ -578,17 +592,14 @@ async function removeTile(kind, id) {
 
 async function addSelectedAsNegatives() {
   if (!selectedCrops.size) return;
-  const assetIds = [...new Set([...selectedCrops.values()].map(c => c.asset_id))];
+  const entries = [...selectedCrops.values()].map(c => ({ asset_id: c.asset_id, bbox: c.bbox }));
+  const assetIds = [...new Set(entries.map(e => e.asset_id))];
   try {
-    await api('/api/negatives', { method: 'POST', body: { asset_ids: assetIds } });
-    negIds = [...new Set([...negIds, ...assetIds])];
-    selectedCrops.forEach((_, key) => {
-      const el = document.getElementById('th-' + key);
-      if (el) { el.classList.remove('selected'); el.classList.add('is-neg'); }
-    });
+    await api('/api/negatives', { method: 'POST', body: { entries } });
+    selectedCrops.forEach((_, key) => document.getElementById('th-' + key)?.classList.remove('selected'));
     selectedCrops.clear(); updateSelUI();
     dropScanLowConf(assetIds);
-    await loadNegatives();
+    await loadNegatives();  // reloads negEntries and marks the matching tiles
     toast('Added to "not a pet"', 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -627,10 +638,7 @@ async function viewNegCandidates() {
     }
     const thr = d.threshold || 0.8;
     grid.innerHTML = d.assets.flatMap(a => renderPhotoItems(a, thr)).join('');
-    const negSet = new Set(negIds);
-    d.assets.forEach(a => {
-      if (negSet.has(a.id)) document.getElementById('th-' + a.id)?.classList.add('is-neg');
-    });
+    markNegTiles();
   } catch(e) {
     clearInterval(negPollTimer); negPollTimer = null;
     if (negGeneration !== myGen) return;
@@ -657,7 +665,7 @@ async function clearAllNegatives() {
   if (!confirm(`Remove all "not a pet" photos from Pet Tagger? This will not affect Immich.`)) return;
   try {
     await api('/api/negatives/all', { method: 'DELETE' });
-    negIds = [];
+    negEntries = [];
     await loadNegatives();
     toast('All "not a pet" photos cleared', 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
@@ -804,9 +812,8 @@ function renderScanLowConf() {
   selectedCrops.clear(); lastClickedKey = null; updateSelUI();
   const assets = scanLowConfFilter === null ? scanLowConfAssets : scanLowConfAssets.filter(a => a.pet_name === scanLowConfFilter);
   label.textContent = `${assets.length} low confidence result${assets.length !== 1 ? 's' : ''}`;
-  const negSet = new Set(negIds);
   grid.innerHTML = assets.flatMap(a => renderPhotoItems(a, scanLowConfThreshold)).join('');
-  assets.forEach(a => { if (negSet.has(a.id)) document.getElementById('th-' + a.id)?.classList.add('is-neg'); });
+  markNegTiles();
 }
 
 async function applyTimestamp() {

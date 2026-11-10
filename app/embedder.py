@@ -396,16 +396,17 @@ def get_crops_and_embed(asset_id: str) -> list[tuple[dict, np.ndarray]]:
 
 
 def embed_crop_by_bbox(asset_id: str, bbox: list) -> np.ndarray | None:
-    """Embed a specific crop by normalized bounding box. Used for crop-centric refs."""
+    """Embed a specific crop by normalized bounding box. Used for crop-centric refs and negatives.
+    Cached under a per-bbox key, so two crops of the same photo (e.g. a ref crop and a
+    "not a pet" crop) never share a vector, and embed_asset_crops' per-asset list is untouched."""
     global _cache_dirty
+    key = f"{asset_id}@" + ",".join(f"{c:.4f}" for c in bbox)
     with _cache_lock:
-        cached = _embed_cache.get(asset_id)
+        cached = _embed_cache.get(key)
         if cached is not None:
-            _embed_cache.move_to_end(asset_id)
+            _embed_cache.move_to_end(key)
     if cached is not None:
-        vecs = cached if isinstance(cached, list) else [cached]
-        if len(vecs) == 1:
-            return vecs[0]
+        return cached
     img = fetch_thumbnail(asset_id)
     if img is None:
         return None
@@ -415,8 +416,8 @@ def embed_crop_by_bbox(asset_id: str, bbox: list) -> np.ndarray | None:
     vec = embed_image(crop_img)
     if vec is not None:
         with _cache_lock:
-            _embed_cache[asset_id] = vec
-            _embed_cache.move_to_end(asset_id)
+            _embed_cache[key] = vec
+            _embed_cache.move_to_end(key)
             if len(_embed_cache) > MAX_EMBED_CACHE_SIZE:
                 _embed_cache.popitem(last=False)
             _cache_dirty = True
@@ -501,8 +502,10 @@ def embed_asset_crops(asset_id: str, require_animal: bool = False) -> list[np.nd
         cached = _embed_cache.get(asset_id)
         if cached is not None:
             _embed_cache.move_to_end(asset_id)
-    if cached is not None:
-        return cached if isinstance(cached, list) else [cached]
+    # A bare vector under the asset id was written by the old embed_crop_by_bbox for one
+    # crop only, so it is not this asset's crop list: recompute and overwrite it.
+    if isinstance(cached, list):
+        return cached
     img = fetch_thumbnail(asset_id)
     if img is None:
         return []

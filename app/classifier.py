@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
+import data
 import embedder as emb
 
 log = logging.getLogger("classifier")
@@ -15,7 +16,7 @@ log = logging.getLogger("classifier")
 def build_classifier(
     pet_names: list[str],
     refs_per_pet: dict[str, list[dict]],
-    negative_ids: list[str] | None = None,
+    negatives: list[dict] | None = None,
 ) -> tuple[list[str], LogisticRegression, StandardScaler] | None:
     all_vecs = []
     all_labels = []
@@ -46,15 +47,20 @@ def build_classifier(
                     log.warning(f"  Skipped ref {asset_id} for '{name}' (thumbnail unavailable)")
 
     total_refs = sum(len(refs) for refs in refs_per_pet.values())
-    if negative_ids:
+    if negatives:
         target = total_refs * 3
-        if len(negative_ids) > target:
-            negative_ids = random.Random(0).sample(sorted(negative_ids), target)
+        if len(negatives) > target:
+            negatives = random.Random(0).sample(sorted(negatives, key=data.crop_entry_key), target)
             log.info(f"Subsampled negatives to {target} (3x {total_refs} refs)")
 
-        log.info(f"Embedding {len(negative_ids)} negative samples...")
-        for aid in negative_ids:
-            vecs = emb.embed_asset_crops(aid)
+        log.info(f"Embedding {len(negatives)} negative samples...")
+        for neg in negatives:
+            # A crop entry adds only that crop, a whole-photo entry adds every crop of the photo.
+            if neg.get("bbox"):
+                vec = emb.embed_crop_by_bbox(neg["asset_id"], neg["bbox"])
+                vecs = [vec] if vec is not None else []
+            else:
+                vecs = emb.embed_asset_crops(neg["asset_id"])
             for vec in vecs:
                 all_vecs.append(vec)
                 all_labels.append(unknown_idx)
