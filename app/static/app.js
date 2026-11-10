@@ -74,8 +74,6 @@ function renderSidebar() {
     el.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text3);text-align:center;line-height:1.6;">No pets yet.<br>Add one to get started.</div>';
     if (!activeList) {
       showGuide();
-      document.getElementById('petBar').style.display = 'none';
-      setCenterView('results');
     }
     return;
   }
@@ -103,8 +101,17 @@ function renderListRows() {
     </div>`).join('');
 }
 
+// The "i" button: leave the current pet or list, then show the guide on its own.
+function openGuide() {
+  if (!leaveSelection()) return;
+  activePet = null; activeList = null; refsItems = [];
+  renderSidebar();
+  showGuide();
+}
+
 function showGuide() {
-  setCenterView('results');
+  setCenterView('guide');
+  document.getElementById('petBar').style.display = 'none';
   document.getElementById('resultsLabel').textContent = '';
   document.getElementById('photoGrid').innerHTML = `<div class="guide" style="grid-column:1/-1">
     <p style="margin:0 0 12px;">Getting good results takes a few iterations. Start by adding a pet, building up references, and adding some negatives. Run a short test scan, review the results, refine, and repeat until you're satisfied. Then run the full backfill.</p>
@@ -957,8 +964,6 @@ async function confirmDeletePet(localOnly) {
     await api(url, { method: 'DELETE' });
     if (activePet?.name === name) {
       activePet = null; refsItems = [];
-      document.getElementById('petBar').style.display = 'none';
-      setCenterView('results');
       showGuide();
     }
     await refreshState();

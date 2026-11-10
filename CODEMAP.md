@@ -63,11 +63,13 @@ API routes for the enrollment UI. All Immich communication happens here; the bro
 - `async get_scan_result()` L1298
 - `async get_scan_low_confidence()` L1313
 - `async list_immich_people()` L1345
-- `async person_thumbnail(person_id)` L1360
-- `async get_asset_crops(asset_id)` L1373: Look up one asset by ID and return its detected animal crops, so a user can manually add a reference or negative by pasting an Immich photo link or ID.
-- `async thumbnail(asset_id)` L1393
-- `async animal_crop(asset_id, bbox)` L1400: Return a cropped animal region by bbox (x1,y1,x2,y2 normalized), or the full thumbnail.
-Constants: IMMICH_EXTERNAL_URL, DATA_DIR, PETS_DIR, LONG_REQUEST_TIMEOUT, KEEPALIVE_INTERVAL, _VERSION_FILE, BENCHMARK_BUCKETS, SWEEP_SCORE_FLOOR
+- `_cache_if_ok(status_code, headers)` L1368
+- `async person_thumbnail(person_id)` L1373
+- `async get_asset_crops(asset_id)` L1387: Look up one asset by ID and return its detected animal crops, so a user can manually add a reference or negative by pasting an Immich photo link or ID.
+- `async _grid_thumbnail(asset_id)` L1406: Immich's small thumbnail (about 250px) for grid tiles. The large preview size is only needed as a source for crops and for embedding (embedder.fetch_thumbnail).
+- `async thumbnail(asset_id)` L1417
+- `async animal_crop(asset_id, bbox)` L1422: Return a cropped animal region by bbox (x1,y1,x2,y2 normalized), or the full thumbnail.
+Constants: IMMICH_EXTERNAL_URL, DATA_DIR, PETS_DIR, LONG_REQUEST_TIMEOUT, KEEPALIVE_INTERVAL, _VERSION_FILE, BENCHMARK_BUCKETS, SWEEP_SCORE_FLOOR, ASSET_IMAGE_CACHE, PERSON_IMAGE_CACHE, CROP_TILE_MAX
 
 ## app/classifier.py
 Logistic regression classifier over CLIP embeddings.
@@ -240,76 +242,77 @@ Standalone entry point for running one poll cycle in an isolated OS process.
 - `refreshState` L38
 - `loadPets` L59
 - `renderSidebar` L70
-- `renderListRows` L95
-- `showGuide` L106
-- `clearSearch` L123
-- `setCenterView` L130
-- `leaveSelection` L135
-- `showCenterHeader` L146
-- `selectPet` L154
-- `selectList` L163
-- `loadRefs` L172
-- `renderRefs` L183
-- `removeRef` L198
-- `assignSelectedTo` L222
-- `renderPetBtns` L247
-- `getCropData` L257
-- `renderPhotoItems` L263
-- `markGridItems` L287
-- `bboxesMatch` L302
-- `isNegCrop` L305
-- `markNegTiles` L308
-- `viewFindRefs` L319
-- `parseAssetId` L331
-- `_openAddByIdModal` L340
-- `openAddById` L365
-- `openAddNegById` L366
-- `closeAddById` L368
-- `submitAddById` L373
-- `viewSuggestions` L436
-- `viewBorderline` L462
-- `toggleSelect` L509
-- `updateSelUI` L533
-- `skipSelected` L543
-- `loadTileList` L575
-- `loadNegatives` L598
-- `loadIgnored` L599
-- `removeTile` L601
-- `addSelectedAsNegatives` L610
-- `viewNegCandidates` L624
-- `clearAllRefs` L667
-- `clearAllNegatives` L680
-- `fmtDate` L694
-- `relativeTime` L701
-- `prefillScanUntil` L714
-- `loadScanResult` L719
-- `showScanResult` L723
-- `viewScanLowConf` L772
-- `renderScanLowConfFilterBtns` L801
-- `dropScanLowConf` L816
-- `renderScanLowConf` L825
-- `applyTimestamp` L835
-- `stopScan` L854
-- `modalError` L867
-- `clearModalError` L868
-- `openAddPet` L870
-- `closeModal` L875
-- `submitAddPet` L877
-- `openEditPet` L900
-- `closeEditModal` L910
-- `submitEditPet` L912
-- `openDeletePet` L939
-- `closeDeleteModal` L949
-- `confirmDeletePet` L951
-- `confirmResetPet` L969
-- `openImportPet` L986
-- `renderImportPeople` L1002
-- `filterImportPeople` L1016
-- `handlePersonCardClick` L1021
-- `closeImportPicker` L1036
-- `closeImportDetail` L1037
-- `backToImportPicker` L1038
-- `submitImportPet` L1040
+- `renderListRows` L93
+- `openGuide` L105
+- `showGuide` L112
+- `clearSearch` L130
+- `setCenterView` L137
+- `leaveSelection` L142
+- `showCenterHeader` L153
+- `selectPet` L161
+- `selectList` L170
+- `loadRefs` L179
+- `renderRefs` L190
+- `removeRef` L205
+- `assignSelectedTo` L229
+- `renderPetBtns` L254
+- `getCropData` L264
+- `renderPhotoItems` L270
+- `markGridItems` L294
+- `bboxesMatch` L309
+- `isNegCrop` L312
+- `markNegTiles` L315
+- `viewFindRefs` L326
+- `parseAssetId` L338
+- `_openAddByIdModal` L347
+- `openAddById` L372
+- `openAddNegById` L373
+- `closeAddById` L375
+- `submitAddById` L380
+- `viewSuggestions` L443
+- `viewBorderline` L469
+- `toggleSelect` L516
+- `updateSelUI` L540
+- `skipSelected` L550
+- `loadTileList` L582
+- `loadNegatives` L605
+- `loadIgnored` L606
+- `removeTile` L608
+- `addSelectedAsNegatives` L617
+- `viewNegCandidates` L631
+- `clearAllRefs` L674
+- `clearAllNegatives` L687
+- `fmtDate` L701
+- `relativeTime` L708
+- `prefillScanUntil` L721
+- `loadScanResult` L726
+- `showScanResult` L730
+- `viewScanLowConf` L779
+- `renderScanLowConfFilterBtns` L808
+- `dropScanLowConf` L823
+- `renderScanLowConf` L832
+- `applyTimestamp` L842
+- `stopScan` L861
+- `modalError` L874
+- `clearModalError` L875
+- `openAddPet` L877
+- `closeModal` L882
+- `submitAddPet` L884
+- `openEditPet` L907
+- `closeEditModal` L917
+- `submitEditPet` L919
+- `openDeletePet` L946
+- `closeDeleteModal` L956
+- `confirmDeletePet` L958
+- `confirmResetPet` L974
+- `openImportPet` L991
+- `renderImportPeople` L1007
+- `filterImportPeople` L1021
+- `handlePersonCardClick` L1026
+- `closeImportPicker` L1041
+- `closeImportDetail` L1042
+- `backToImportPicker` L1043
+- `submitImportPet` L1045
 
 ## scripts/gen_codemap.py
 Generate CODEMAP.md: an index of functions/classes with line numbers.

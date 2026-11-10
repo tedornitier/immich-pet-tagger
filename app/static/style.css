@@ -73,6 +73,8 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .refs-header { padding: 12px 16px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
 .results-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .results-panel[data-view="refs"] > .results-view, .results-panel[data-view="results"] > #refsGrid, .results-panel[data-view="results"] .refs-header .tile-zoom, .results-panel[data-view="refs"] #refsViewBtn { display: none; }
+/* The guide stands alone: no pet bar, results header or filters. */
+.results-panel[data-view="guide"] > #refsGrid, .results-panel[data-view="guide"] .results-header, .results-panel[data-view="guide"] #scanFilterBtns { display: none; }
 .ref-thumb { border-radius: 5px; overflow: hidden; position: relative; background: var(--bg3); border: 0.5px solid var(--border); }
 .ref-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .ref-remove { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; background: rgba(0,0,0,0.7); border: none; color: #fff; font-size: 10px; cursor: pointer; display: none; align-items: center; justify-content: center; line-height: 1; }
@@ -137,11 +139,11 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .pet-item:hover .pet-delete, .pet-item:hover .pet-edit { display: flex; }
 .pet-delete:hover { color: var(--danger) !important; }
 .pet-edit:hover { color: var(--accent) !important; }
-.guide { padding: 32px 40px; max-width: 560px; }
-.guide-steps { display: flex; flex-direction: column; gap: 20px; }
+.guide { padding: 32px 40px; max-width: 760px; margin: 0 auto; }
+.guide-steps { display: flex; flex-direction: column; gap: 24px; }
 .guide-step { display: flex; gap: 14px; align-items: flex-start; }
 .guide-step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--bg3); border: 0.5px solid var(--border2); color: var(--accent); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
 .guide-step-body { flex: 1; }
-.guide-step-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
-.guide-step-desc { font-size: 12px; color: var(--text2); line-height: 1.55; }
+.guide-step-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.guide-step-desc { font-size: 13px; color: var(--text2); line-height: 1.6; }
 .tile-empty { grid-column: 1/-1; font-size: 12px; color: var(--text3); padding: 6px 2px; }
