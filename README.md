@@ -10,7 +10,7 @@ Uses CLIP embeddings and a few reference photos you provide. No cloud services, 
 
 1. You enroll your pets via a web UI: provide a few reference photos and a short description
 2. A logistic regression classifier is trained locally on CLIP embeddings of those references
-3. Every hour, new photos are scanned: YOLO detects and crops any animals in the photo, then each crop is embedded with CLIP and classified against your pets
+3. Every hour (by default), new photos are scanned: YOLO detects and crops any animals in the photo, then each crop is embedded with CLIP and classified against your pets
 4. Matching pets are tagged in Immich
 5. Pets appear in Immich's People section just like humans
 
@@ -84,7 +84,7 @@ If you want GPU acceleration, see [GPU support](#gpu-support) before running.
 
 The first time the app actually needs to detect or classify a photo (a scan, or a UI action like Find suggestions), it downloads the YOLO model (~6 MB) and CLIP model (~350 MB) and saves them to the /data volume. After that, they load from disk and no internet connection is needed. The container must have internet access for this first download.
 
-The image also runs with a read-only root filesystem: all writes (model caches and configuration included) go to the `/data` volume.
+The image is compatible with a read-only root filesystem (`read_only: true`): all writes (model caches and configuration included) go to the `/data` volume.
 
 ### 4. Open the UI
 
@@ -157,7 +157,7 @@ These teach the classifier what not to tag: empty rooms, other animals of a diff
 
 Start with a recent date so the scan covers fewer photos, making it quicker to review and refine before committing to a full backfill.
 
-1. In the **Scan from** panel at the bottom of the sidebar, set a date 1–2 weeks back
+1. In the scan panel at the bottom of the sidebar, set the **From** date 1–2 weeks back
 2. Click **Scan** and wait for the results
 3. If **Review N low confidence** appears in the results, click it to see photos the classifier identified as a match but wasn't fully confident about.
 4. Go through them: add correctly identified ones as references, and click **Ignore** on the rest. Ignored photos won't appear in future results.
@@ -175,7 +175,7 @@ Once you're happy with the accuracy on the test window:
 1. Set the scan date to the earliest date you want to tag. A good starting point is the date you got your pet.
 2. Click **Scan** to process all photos in that range
 
-After that, the background poller runs every hour and tags new photos automatically. Your pets appear in Immich's **People** section.
+After that, the background poller runs every hour (`POLL_INTERVAL`) and tags new photos automatically. Your pets appear in Immich's **People** section.
 
 ---
 
@@ -198,16 +198,17 @@ Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `IMMICH_API_KEY` | required | Immich API key |
 | `TAG_NAME` | *(unset, `immich-pet-tagger` in docker-compose.yml)* | If set, this Immich tag is applied to every photo the tagger writes a face to (scans or enrolling a reference), giving you a review queue in Immich. Use `/` for a nested tag (e.g. `Pets/Review`), or remove the line to disable it. Created on first use, and removed from a photo again when its last pet face is removed. Removing it yourself in Immich is safe, Pet Tagger never reads it back. Not applied retroactively to photos tagged before it was enabled. |
 | `POLL_INTERVAL` | `3600` | Seconds between background scans. Models are loaded only during a scan and unloaded afterward to save RAM. |
-| `CLIP_MODEL_NAME` | `ViT-B-16` | CLIP model architecture, passed to `open_clip.create_model_and_transforms`. See [open_clip's pretrained list](https://github.com/mlfoundations/open_clip/blob/main/docs/pretrained.md) for valid combinations with `CLIP_PRETRAINED`. Larger models need more RAM/VRAM per `GPU_WORKERS` thread. Embedding caches are namespaced per CLIP/YOLO model combo, so switching is safe and does not affect other models' cached data, but each new combo starts with a cold cache and re-embeds refs and assets on first use. |
+| `CLIP_MODEL_NAME` | `ViT-B-16` | CLIP model architecture, passed to `open_clip.create_model_and_transforms`. See [open_clip's pretrained list](https://github.com/mlfoundations/open_clip/blob/main/docs/pretrained.md) for valid combinations with `CLIP_PRETRAINED`. Larger models need more RAM/VRAM per `MODEL_WORKERS` thread. Embedding caches are namespaced per CLIP/YOLO model combo, so switching is safe and does not affect other models' cached data, but each new combo starts with a cold cache and re-embeds refs and assets on first use. |
 | `CLIP_PRETRAINED` | `openai` | CLIP pretrained weights tag for `CLIP_MODEL_NAME`. |
-| `YOLO_MODEL_NAME` | `yolov8n.pt` | YOLO detection model, passed to `ultralytics.YOLO`. Any Ultralytics-compatible weights file works (e.g. `yolov8s.pt`, `yolov8m.pt` for better accuracy at the cost of speed), as long as it's COCO-trained so the animal class IDs still line up. Larger models need more RAM/VRAM per `GPU_WORKERS` thread. |
-| `SCAN_WORKERS` | `GPU_WORKERS × 32` | Concurrent thumbnail fetches. Auto-derived to keep GPU batches full. Override only if Immich feels slow during scans. |
-| `GPU_WORKERS` | `2` (GPU) / `1` (CPU) | Parallel YOLO and CLIP inference threads. `2` is optimal for GPU; CPU defaults to `1` since a second worker just duplicates the models in RAM with no throughput gain. |
+| `YOLO_MODEL_NAME` | `yolov8n.pt` | YOLO detection model, passed to `ultralytics.YOLO`. Any Ultralytics-compatible weights file works (e.g. `yolov8s.pt`, `yolov8m.pt` for better accuracy at the cost of speed), as long as it's COCO-trained so the animal class IDs still line up. Larger models need more RAM/VRAM per `MODEL_WORKERS` thread. |
+| `SCAN_WORKERS` | `MODEL_WORKERS × 32` (GPU) / `8` (CPU) | Concurrent thumbnail fetches. Auto-derived to keep GPU batches full. Override only if Immich feels slow during scans. |
+| `MODEL_WORKERS` | `2` (GPU) / `1` (CPU) | Parallel YOLO and CLIP inference threads, on GPU and CPU alike. `2` is optimal for GPU; CPU defaults to `1` since a second worker just duplicates the models in RAM with no throughput gain. Values below `1` are treated as `1`. Replaces `GPU_WORKERS`, which is still read when `MODEL_WORKERS` is unset. |
 | `YOLO_INPUT_SIZE` | `640` | YOLO detection resolution in pixels. Higher values improve detection of small animals at the cost of more memory and compute. Must be a multiple of 32. |
 | `YOLO_BATCH_SIZE` | `32` | Max images per YOLO inference batch. Reduce if you hit GPU out-of-memory errors. |
+| `CLIP_BATCH_SIZE` | `32` | Max images per CLIP embedding batch. Reduce if you hit GPU out-of-memory errors. |
 | `EMBED_CACHE_SIZE` | `5000` | Max number of embeddings kept in the in-memory LRU cache. Older entries are evicted when the limit is reached. |
 | `THRESHOLD` | `0.8` | Min confidence (0–1) to tag a photo, when YOLO found a real crop. |
-| `THRESHOLD_FALLBACK` | same as `THRESHOLD` | Min confidence (0–1) to tag a photo when YOLO found nothing and the whole image was classified instead of a crop. This fallback is a noisier signal than a real crop, so raising it above `THRESHOLD` trades a bit of recall for fewer false positives. |
+| `THRESHOLD_FALLBACK` | same as `THRESHOLD` (`0.85` in docker-compose.yml) | Min confidence (0–1) to tag a photo when YOLO found nothing and the whole image was classified instead of a crop. This fallback is a noisier signal than a real crop, so raising it above `THRESHOLD` trades a bit of recall for fewer false positives. |
 | `YOLO_CONF` | `0.25` (`0.2` in docker-compose.yml) | Min YOLO detection confidence (0–1) to count as a real crop. Lower catches more (small, turned-away, or partially visible pets) but crops get noisier. Below this, tagging falls back to embedding the whole photo instead of a crop. |
 | `IOU_THRESHOLD` | `0.7` | YOLO's NMS IoU threshold (0–1). Overlapping detections whose boxes overlap more than this fraction are merged into one. Lower this if two cuddling/overlapping pets in the same photo are being collapsed into a single detection. |
 | `LONG_REQUEST_TIMEOUT` | `120` | Max seconds for CPU-heavy UI requests (Find missed, Find candidates, Find references). Responses stream keepalive bytes so browsers do not drop idle connections. |
@@ -221,7 +222,6 @@ The default setup runs on CPU and requires no extra configuration. A GPU makes s
 **NVIDIA GPU:** install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on your host, then in `docker-compose.yml`:
 1. Change the image tag to `:latest` (default) or `:cuda-legacy` (Maxwell/Pascal/Volta, see below)
 2. Uncomment the `deploy:` section
-3. Set `GPU_WORKERS=2`
 
 ```yaml
 image: ghcr.io/tedornitier/immich-pet-tagger:latest
@@ -256,7 +256,7 @@ CPU-only works fine for most home libraries. Expect roughly 10x slower processin
 
 The default models (`YOLO_MODEL_NAME=yolov8n.pt`, `CLIP_MODEL_NAME=ViT-B-16`/`CLIP_PRETRAINED=openai`) are chosen to run comfortably on CPU, including low-power hardware like a Raspberry Pi. If you have GPU headroom and want to trade resources for accuracy, `YOLO_MODEL_NAME=yolov8s.pt` with `CLIP_MODEL_NAME=ViT-L-14`/`CLIP_PRETRAINED=openai` measured ~40% fewer missed tags and ~13% fewer false positives than the defaults on my own library (96% tagging accuracy at a 1.4% false-positive rate). This is opt-in, not the shipped default, for two reasons:
 
-- `ViT-L-14` is roughly 4x the parameters/compute of the default `ViT-B-16`, and needs a larger download (~900MB vs ~350MB) plus more RAM/VRAM per `GPU_WORKERS` thread. That conflicts with the project's CPU-friendly default.
+- `ViT-L-14` is roughly 4x the parameters/compute of the default `ViT-B-16`, and needs a larger download (~900MB vs ~350MB) plus more RAM/VRAM per `MODEL_WORKERS` thread. That conflicts with the project's CPU-friendly default.
 - The accuracy gain was measured on one library with several hundred reference photos per pet. A classifier with very few refs may not benefit as much from the larger embedding space, since there's less data to fit a good decision boundary with.
 
 If you want to try it, set in `docker-compose.yml`:
