@@ -110,6 +110,7 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .toast.show { transform: translateY(0); }
 .toast.success { border-color: var(--success); color: var(--success); }
 .toast.error { border-color: var(--danger); color: var(--danger); }
+.toast.warn { border-color: #c9954a; color: #c9954a; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }

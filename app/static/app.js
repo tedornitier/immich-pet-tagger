@@ -1,4 +1,4 @@
-let pets = [], activePet = null, activeList = null, listCounts = { neg: 0, skipped: 0 }, selectedCrops = new Map(), refsItems = [], negEntries = [], immichUrl = 'http://localhost:2283', negCandidateMode = false, borderlineMode = false, scanLowConfMode = false, lastClickedKey = null, negGeneration = 0, negPollTimer = null, blGeneration = 0, blPollTimer = null, scanLowConfAssets = [], scanLowConfThreshold = 0.8, scanLowConfFilter = null;
+let pets = [], activePet = null, activeList = null, listCounts = { neg: 0, skipped: 0 }, selectedCrops = new Map(), refsItems = [], negEntries = [], immichUrl = 'http://localhost:2283', resultsMode = null, resultsGen = 0, lastClickedKey = null, negPollTimer = null, blPollTimer = null, scanLowConfAssets = [], scanLowConfThreshold = 0.8, scanLowConfFilter = null;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -110,6 +110,7 @@ function openGuide() {
 }
 
 function showGuide() {
+  resetResults();
   setCenterView('guide');
   document.getElementById('petBar').style.display = 'none';
   document.getElementById('resultsLabel').textContent = '';
@@ -144,9 +145,30 @@ function leaveSelection() {
     const ok = confirm(`You have ${selectedCrops.size} selected photo${selectedCrops.size !== 1 ? 's' : ''} not yet assigned. Switch anyway?`);
     if (!ok) return false;
   }
-  negCandidateMode = false; borderlineMode = false; scanLowConfMode = false;
-  document.getElementById('scanFilterBtns').style.display = 'none';
+  resetResults();
   return true;
+}
+
+// Drops the current finder: stops its progress pollers, and bumping resultsGen makes any
+// response still in flight see it is stale and not paint over what is shown now.
+function resetResults() {
+  resultsGen++;
+  resultsMode = null;
+  if (blPollTimer) { clearInterval(blPollTimer); blPollTimer = null; }
+  if (negPollTimer) { clearInterval(negPollTimer); negPollTimer = null; }
+  document.getElementById('scanFilterBtns').style.display = 'none';
+}
+
+// Every finder starts here. mode is 'suggest' | 'borderline' | 'negCandidates' | 'lowConf' |
+// 'pickCrop'. Returns the generation to compare with resultsGen after each await.
+function startResults(mode, labelText, loadingText = null) {
+  resetResults();
+  resultsMode = mode;
+  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
+  setCenterView('results');
+  document.getElementById('resultsLabel').textContent = labelText;
+  if (loadingText != null) document.getElementById('photoGrid').innerHTML = `<div class="loading" id="resultsLoadMsg" style="grid-column:1/-1">${loadingText}</div>`;
+  return resultsGen;
 }
 
 // The center header serves the active pet or the active list; data-kind picks its buttons.
@@ -173,6 +195,8 @@ async function selectList(kind) {
   activePet = null; activeList = kind; refsItems = [];
   clearSearch(); renderSidebar();
   showCenterHeader(TILE_LISTS[kind].title, kind);
+  document.getElementById('refsViewBtn').textContent = TILE_LISTS[kind].title;
+  document.getElementById('refsGrid').innerHTML = '<div class="loading">Loading…</div>';
   await loadTileList(kind);
 }
 
@@ -224,28 +248,35 @@ async function removeRef(assetId, cropIdx = null) {
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
+// Adds crops ({asset_id, crop_idx, bbox}) as refs of petName. The POST replaces the whole
+// list, so merge with the server's current refs, deduped per asset+crop, then refresh.
+// Shared by the finder grid and Add by ID so both dedupe the same way.
+async function addRefs(petName, crops) {
+  const existing = await api(`/api/pets/${encodeURIComponent(petName)}/assets`);
+  const existingCrops = existing.assets.map(a => ({ asset_id: a.id, crop_idx: a.crop_idx, bbox: a.bbox }));
+  const seen = new Set();
+  const merged = [...existingCrops, ...crops].filter(c => {
+    const k = c.crop_idx != null ? `${c.asset_id}_${c.crop_idx}` : c.asset_id;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+  await api(`/api/pets/${encodeURIComponent(petName)}/assets`, { method: 'POST', body: { assets: merged } });
+  if (activePet?.name === petName) await loadRefs(petName);
+  await refreshState();
+}
+
 // Adds the selected photos as refs of any pet, not only the active one, so a photo of
 // another pet found in this pet's list can go straight to that pet (see #64).
 async function assignSelectedTo(petName) {
   if (!selectedCrops.size) return;
   const newCrops = [...selectedCrops.values()];
   try {
-    const existing = await api(`/api/pets/${encodeURIComponent(petName)}/assets`);
-    const existingCrops = existing.assets.map(a => ({ asset_id: a.id, crop_idx: a.crop_idx, bbox: a.bbox }));
-    const seen = new Set();
-    const merged = [...existingCrops, ...newCrops].filter(c => {
-      const k = c.crop_idx != null ? `${c.asset_id}_${c.crop_idx}` : c.asset_id;
-      if (seen.has(k)) return false;
-      seen.add(k); return true;
-    });
-    await api(`/api/pets/${encodeURIComponent(petName)}/assets`, { method: 'POST', body: { assets: merged } });
+    await addRefs(petName, newCrops);
     selectedCrops.forEach((_, key) => {
       const el = document.getElementById('th-' + key);
       if (el) { el.classList.remove('selected'); el.classList.add('is-ref'); }
     });
     selectedCrops.clear(); updateSelUI();
-    if (activePet?.name === petName) await loadRefs(petName);
-    await refreshState();
     dropScanLowConf(newCrops.map(c => c.asset_id));
     toast(`Added ${newCrops.length} to ${petName}`, 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
@@ -377,7 +408,17 @@ function closeAddById() {
   clearModalError('addByIdError');
 }
 
+// Looking up a photo's crops loads the models and can take a few seconds, so the Add
+// button shows it is working and can't be clicked twice.
 async function submitAddById() {
+  const btn = document.getElementById('addByIdSubmit');
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try { await _submitAddById(); }
+  finally { btn.disabled = false; btn.textContent = 'Add'; }
+}
+
+async function _submitAddById() {
   clearModalError('addByIdError');
 
   if (_addByIdMode === 'neg') {
@@ -411,25 +452,16 @@ async function submitAddById() {
     const crops = a.crops || [];
     if (crops.length <= 1) {
       // 0 or 1 crop: add immediately, no picker needed
-      const existing = refsItems.map(r => ({ asset_id: r.id, crop_idx: r.crop_idx, bbox: r.bbox }));
       const newCrop = crops.length === 1
         ? { asset_id: id, crop_idx: crops[0].crop_idx, bbox: crops[0].bbox }
         : { asset_id: id, crop_idx: null, bbox: null };
-      const alreadyPresent = existing.some(r => r.asset_id === id);
-      if (!alreadyPresent) existing.push(newCrop);
-      await api(`/api/pets/${encodeURIComponent(pet.name)}/assets`, { method: 'POST', body: { assets: existing } });
+      await addRefs(pet.name, [newCrop]);
       closeAddById();
-      await loadRefs(pet.name);
-      await refreshState();
       toast(`Added to ${pet.name}`, 'success');
     } else {
       // Multiple crops: load into grid so user picks the right animal
       closeAddById();
-      negCandidateMode = false; borderlineMode = false; scanLowConfMode = false;
-      document.getElementById('scanFilterBtns').style.display = 'none';
-      selectedCrops.clear(); lastClickedKey = null; updateSelUI();
-      setCenterView('results');
-      document.getElementById('resultsLabel').textContent = `${crops.length} pets detected. Select the one to add as reference`;
+      startResults('pickCrop', `${crops.length} pets detected. Select the one to add as reference`);
       document.getElementById('photoGrid').innerHTML = renderPhotoItems(a, 0.8).join('');
       markGridItems([a]);
     }
@@ -444,14 +476,12 @@ async function viewSuggestions() {
   if (!activePet) return;
   const pet = activePet;
   if (!pet.description) { toast('Edit this pet and add a description to use this feature', 'error'); return; }
-  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
-  setCenterView('results');
+  const myGen = startResults('suggest', 'Finding references…', 'Finding similar photos… this may take a moment');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
-  grid.innerHTML = '<div class="loading" style="grid-column:1/-1">Finding similar photos… this may take a moment</div>';
-  label.textContent = 'Finding references…';
   try {
     const d = await api(`/api/pets/${encodeURIComponent(pet.name)}/suggestions`);
+    if (resultsGen !== myGen) return;
     label.textContent = `${d.assets.length} photo${d.assets.length !== 1 ? 's' : ''} similar to ${pet.name}`;
     if (!d.assets.length) {
       grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No suggestions found</div><div class="empty-sub">Add more refs or broaden the date range</div></div>';
@@ -460,6 +490,7 @@ async function viewSuggestions() {
     grid.innerHTML = d.assets.flatMap(a => renderPhotoItems(a, 0.8)).join('');
     markGridItems(d.assets);
   } catch(e) {
+    if (resultsGen !== myGen) return;
     label.textContent = 'Failed to load suggestions';
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">${e.message}</div></div>`;
     toast('Suggestions error: ' + e.message, 'error');
@@ -468,23 +499,17 @@ async function viewSuggestions() {
 
 async function viewBorderline() {
   if (!activePet || !activePet.ref_count) return;
-  const myGen = ++blGeneration;
-  if (blPollTimer) { clearInterval(blPollTimer); blPollTimer = null; }
-  negCandidateMode = false; borderlineMode = true;
-  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
-  setCenterView('results');
+  const petName = activePet.name;
+  const myGen = startResults('borderline', 'Finding references…', 'Loading…');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
-  const petName = activePet.name;
-  grid.innerHTML = '<div class="loading" id="blLoadMsg" style="grid-column:1/-1">Loading…</div>';
-  label.textContent = 'Finding references…';
 
-  blPollTimer = setInterval(async () => {
-    if (blGeneration !== myGen) { clearInterval(blPollTimer); blPollTimer = null; return; }
+  const timer = blPollTimer = setInterval(async () => {
+    if (resultsGen !== myGen) { clearInterval(timer); return; }
     try {
       const p = await api(`/api/pets/${encodeURIComponent(petName)}/borderline/progress`);
-      const el = document.getElementById('blLoadMsg');
-      if (!el) return;
+      const el = document.getElementById('resultsLoadMsg');
+      if (!el || resultsGen !== myGen) return;
       if (p.total > 0) el.textContent = `Loading ${Math.round(p.current / p.total * 100)}%…`;
       else if (p.running) el.textContent = 'Loading…';
     } catch(_) {}
@@ -492,8 +517,9 @@ async function viewBorderline() {
 
   try {
     const d = await api(`/api/pets/${encodeURIComponent(petName)}/borderline`);
-    clearInterval(blPollTimer); blPollTimer = null;
-    if (blGeneration !== myGen) return;
+    clearInterval(timer);
+    if (resultsGen !== myGen) return;
+    blPollTimer = null;
     label.textContent = `${d.assets.length} photo${d.assets.length !== 1 ? 's' : ''} ${petName} might be missing. Add good ones as refs to improve accuracy.`;
     if (!d.assets.length) {
       grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No missed photos found</div><div class="empty-sub">The classifier is either very confident or not finding this pet at all</div></div>';
@@ -503,8 +529,9 @@ async function viewBorderline() {
     grid.innerHTML = d.assets.flatMap(a => renderPhotoItems(a, thr)).join('');
     markGridItems(d.assets);
   } catch(e) {
-    clearInterval(blPollTimer); blPollTimer = null;
-    if (blGeneration !== myGen) return;
+    clearInterval(timer);
+    if (resultsGen !== myGen) return;
+    blPollTimer = null;
     label.textContent = 'Failed to load missed photos';
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">${e.message}</div></div>`;
     toast('Error: ' + e.message, 'error');
@@ -540,7 +567,7 @@ function toggleSelect(e, key) {
 function updateSelUI() {
   const n = selectedCrops.size;
   document.getElementById('selCount').textContent = n ? `${n} selected` : '';
-  const showPets = n && !negCandidateMode && pets.length;
+  const showPets = n && resultsMode !== 'negCandidates' && pets.length;
   if (showPets) renderPetBtns();
   document.getElementById('petBtns').style.display = showPets ? 'flex' : 'none';
   document.getElementById('skipBtn').style.display = n ? '' : 'none';
@@ -581,6 +608,7 @@ const TILE_LISTS = {
 
 async function loadTileList(kind) {
   const L = TILE_LISTS[kind];
+  const grid = document.getElementById('refsGrid');
   try {
     const d = await api(L.path);
     const assets = L.newestFirst ? [...d.assets].reverse() : d.assets;
@@ -590,7 +618,6 @@ async function loadTileList(kind) {
     if (L.clearBtn) document.getElementById(L.clearBtn).style.display = d.assets.length ? '' : 'none';
     if (activeList !== kind) return;
     document.getElementById('refsViewBtn').textContent = `${L.title} (${d.assets.length})`;
-    const grid = document.getElementById('refsGrid');
     if (!assets.length) { grid.innerHTML = L.empty ? `<div class="tile-empty">${L.empty}</div>` : ''; return; }
     grid.innerHTML = assets.map(a => `
       <div class="ref-thumb">
@@ -599,7 +626,10 @@ async function loadTileList(kind) {
         </a>
         <button class="ref-remove" onclick="removeTile('${kind}','${a.id}','${L.removeQuery ? L.removeQuery(a) : ''}')" title="Remove">✕</button>
       </div>`).join('');
-  } catch(e) { console.warn('loadTileList ' + kind + ':', e); }
+  } catch(e) {
+    console.warn('loadTileList ' + kind + ':', e);
+    if (activeList === kind) grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-sub">Error loading ${escapeHtml(L.label)}</div></div>`;
+  }
 }
 
 function loadNegatives() { return loadTileList('neg'); }
@@ -629,22 +659,16 @@ async function addSelectedAsNegatives() {
 }
 
 async function viewNegCandidates() {
-  const myGen = ++negGeneration;
-  if (negPollTimer) { clearInterval(negPollTimer); negPollTimer = null; }
-  negCandidateMode = true;
-  selectedCrops.clear(); lastClickedKey = null; updateSelUI();
-  setCenterView('results');
+  const myGen = startResults('negCandidates', 'Finding candidates…', 'Loading…');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
-  grid.innerHTML = '<div class="loading" id="negLoadMsg" style="grid-column:1/-1">Loading…</div>';
-  label.textContent = 'Finding candidates…';
 
-  negPollTimer = setInterval(async () => {
-    if (negGeneration !== myGen) { clearInterval(negPollTimer); negPollTimer = null; return; }
+  const timer = negPollTimer = setInterval(async () => {
+    if (resultsGen !== myGen) { clearInterval(timer); return; }
     try {
       const p = await api('/api/suggestions/negatives/progress');
-      const el = document.getElementById('negLoadMsg');
-      if (!el) return;
+      const el = document.getElementById('resultsLoadMsg');
+      if (!el || resultsGen !== myGen) return;
       if (p.total > 0) el.textContent = `Loading ${Math.round(p.current / p.total * 100)}%…`;
       else if (p.running) el.textContent = 'Loading…';
     } catch(_) {}
@@ -652,8 +676,9 @@ async function viewNegCandidates() {
 
   try {
     const d = await api('/api/suggestions/negatives');
-    clearInterval(negPollTimer); negPollTimer = null;
-    if (negGeneration !== myGen) return;
+    clearInterval(timer);
+    if (resultsGen !== myGen) return;
+    negPollTimer = null;
     label.textContent = `${d.assets.length} candidate${d.assets.length !== 1 ? 's' : ''} for "not a pet"`;
     if (!d.assets.length) {
       grid.innerHTML = '<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-icon">🐾</div><div class="empty-title">No candidates found</div><div class="empty-sub">No uncertain photos in this random sample. Click "Find candidates" again to try another sample.</div></div>';
@@ -663,8 +688,9 @@ async function viewNegCandidates() {
     grid.innerHTML = d.assets.flatMap(a => renderPhotoItems(a, thr)).join('');
     markNegTiles();
   } catch(e) {
-    clearInterval(negPollTimer); negPollTimer = null;
-    if (negGeneration !== myGen) return;
+    clearInterval(timer);
+    if (resultsGen !== myGen) return;
+    negPollTimer = null;
     label.textContent = 'Failed to load candidates';
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1;height:200px;"><div class="empty-sub">${e.message}</div></div>`;
     toast('Error: ' + e.message, 'error');
@@ -777,19 +803,13 @@ function showScanResult(r) {
 }
 
 async function viewScanLowConf() {
-  scanLowConfMode = true;
-  negCandidateMode = false; borderlineMode = false;
-  selectedCrops.clear(); lastClickedKey = null;
   scanLowConfFilter = null;
-  setCenterView('results');
+  const myGen = startResults('lowConf', 'Loading…', 'Loading low confidence results…');
   const grid = document.getElementById('photoGrid');
   const label = document.getElementById('resultsLabel');
-  grid.innerHTML = '<div class="loading" style="grid-column:1/-1">Loading low confidence results…</div>';
-  label.textContent = 'Loading…';
-  document.getElementById('scanFilterBtns').style.display = 'none';
-  updateSelUI();
   try {
     const d = await api('/api/scan/low-confidence');
+    if (resultsGen !== myGen) return;
     scanLowConfAssets = d.assets;
     scanLowConfThreshold = d.threshold ?? 0.8;
     if (!d.assets.length) {
@@ -800,6 +820,7 @@ async function viewScanLowConf() {
     renderScanLowConfFilterBtns();
     renderScanLowConf();
   } catch(e) {
+    if (resultsGen !== myGen) return;
     label.textContent = 'Failed to load';
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1; height:200px;"><div class="empty-sub">${e.message}</div></div>`;
   }
@@ -821,7 +842,7 @@ function renderScanLowConfFilterBtns() {
 // Answered low confidence results (skipped, assigned, not a pet) leave the list, so
 // switching the pet filter re-renders without them and the filter counts stay right.
 function dropScanLowConf(assetIds) {
-  if (!scanLowConfMode) return;
+  if (resultsMode !== 'lowConf') return;
   const drop = new Set(assetIds);
   scanLowConfAssets = scanLowConfAssets.filter(a => !drop.has(a.id));
   if (scanLowConfFilter !== null && !scanLowConfAssets.some(a => a.pet_name === scanLowConfFilter)) scanLowConfFilter = null;
@@ -932,11 +953,17 @@ async function submitEditPet() {
   if (sinceRaw && untilRaw && sinceRaw > untilRaw) { modalError('editPetError', '"Since" must be before "until"'); return; }
   try {
     await api(`/api/pets/${encodeURIComponent(_petToEdit)}`, { method: 'PATCH', body: { name, description, since: sinceRaw || null, until: untilRaw || null } });
+    const editedName = _petToEdit;
     closeEditModal();
-    activePet = null; clearSearch();
-    await loadPets(true);
-    const selectName = prevActiveName === _petToEdit ? name : (prevActiveName || pets[0]?.name);
-    if (selectName) await selectPet(selectName);
+    if (prevActiveName) {
+      // Reselect the active pet (under its new name if it was the one edited).
+      activePet = null; clearSearch();
+      await loadPets(true);
+      await selectPet(prevActiveName === editedName ? name : prevActiveName);
+    } else {
+      // A list or the guide is open: keep it, just refresh the sidebar.
+      await loadPets(true);
+    }
     toast('Saved', 'success');
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }

@@ -1408,6 +1408,8 @@ async def _grid_thumbnail(asset_id: str) -> StreamingResponse:
     needed as a source for crops and for embedding (embedder.fetch_thumbnail)."""
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=thumbnail", headers=imm.headers())
+    if resp.status_code != 200:
+        log.warning(f"Grid thumbnail {asset_id}: Immich returned {resp.status_code}")
     return StreamingResponse(resp.aiter_bytes(), status_code=resp.status_code,
                              media_type=resp.headers.get("content-type", "image/jpeg"),
                              headers=_cache_if_ok(resp.status_code, ASSET_IMAGE_CACHE))
@@ -1438,6 +1440,6 @@ async def animal_crop(asset_id: str, bbox: str | None = None):
                 crop.save(buf, "JPEG", quality=85)
                 buf.seek(0)
                 return StreamingResponse(buf, media_type="image/jpeg", headers=ASSET_IMAGE_CACHE)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"Crop {asset_id} bbox={bbox} failed, serving full thumbnail: {e}")
     return await _grid_thumbnail(asset_id)
