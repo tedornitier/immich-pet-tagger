@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=9">
+<link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -20,6 +20,7 @@
       <button class="info-btn" onclick="showGuide()" title="Getting started">i</button>
     </div>
     <div class="pets-list" id="petsList"></div>
+    <div class="list-rows" id="listRows"></div>
     <button class="add-pet-btn add-pet-btn-primary" onclick="openAddPet()">+ Add pet</button>
     <button class="add-pet-btn" style="margin-bottom:8px;" onclick="openImportPet()">↓ Import from Immich</button>
     <div class="sidebar-bottom">
@@ -47,9 +48,12 @@
               <button class="btn" onclick="changeTileSize(40)">+</button>
             </div>
             <button class="btn" id="refsViewBtn" onclick="setCenterView('refs')" style="font-size:12px; padding:5px 10px;">References (0)</button>
-            <button class="btn btn-primary" id="findRefsBtn" onclick="viewFindRefs()" style="font-size:12px; padding:5px 10px;">Find references</button>
-            <button class="btn" id="addByIdBtn" onclick="openAddById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
-            <button class="btn btn-danger" id="clearRefsBtn" onclick="clearAllRefs()" style="font-size:12px; padding:5px 10px;">Clear all</button>
+            <button class="btn btn-primary pet-only" id="findRefsBtn" onclick="viewFindRefs()" style="font-size:12px; padding:5px 10px;">Find references</button>
+            <button class="btn pet-only" id="addByIdBtn" onclick="openAddById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
+            <button class="btn btn-danger pet-only" id="clearRefsBtn" onclick="clearAllRefs()" style="font-size:12px; padding:5px 10px;">Clear all</button>
+            <button class="btn neg-only" id="findNegsBtn" onclick="viewNegCandidates()" style="font-size:12px; padding:5px 10px;">Find candidates</button>
+            <button class="btn neg-only" id="addNegByIdBtn" onclick="openAddNegById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
+            <button class="btn btn-danger neg-only" id="clearNegsBtn" onclick="clearAllNegatives()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
           </div>
         </div>
         <div class="photo-grid" id="refsGrid"></div>
@@ -69,25 +73,6 @@
           </div>
           <div id="scanFilterBtns" style="display:none; gap:6px; flex-wrap:wrap; padding:8px 16px; border-bottom:0.5px solid var(--border);"></div>
           <div class="photo-grid" id="photoGrid"></div>
-        </div>
-      </div>
-      <div class="refs-panel">
-        <div class="neg-panel side-sec" data-sec="neg">
-          <div class="neg-header">
-            <span class="sec-toggle" onclick="toggleSec('neg')" style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);">Not a pet <span style="font-weight:400;" id="negCount">0</span></span>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button class="btn" id="findNegsBtn" onclick="viewNegCandidates()" style="font-size:12px; padding:5px 10px;">Find candidates</button>
-              <button class="btn" id="addNegByIdBtn" onclick="openAddNegById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
-              <button class="btn btn-danger" id="clearNegsBtn" onclick="clearAllNegatives()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
-            </div>
-          </div>
-          <div class="neg-grid" id="negGrid"></div>
-        </div>
-        <div class="neg-panel side-sec" data-sec="ignored">
-          <div class="neg-header">
-            <span class="sec-toggle" onclick="toggleSec('ignored')" style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);">Ignored <span style="font-weight:400;" id="ignoredCount">0</span></span>
-          </div>
-          <div class="neg-grid" id="ignoredGrid"></div>
         </div>
       </div>
     </div>
@@ -239,6 +224,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=17"></script>
+<script src="/static/app.js?v=18"></script>
 </body>
 </html>

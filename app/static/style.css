@@ -22,7 +22,7 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .support-btn:hover { border-color: #db61a2; color: #db61a2; background: rgba(219, 97, 162, 0.1); }
 .logo { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }
 .logo-sub { font-size: 11px; color: var(--text3); }
-.pets-list { flex: 1; overflow-y: auto; padding: 8px; }
+.pets-list { flex: 0 1 auto; overflow-y: auto; padding: 8px; }
 .pet-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; transition: background 0.1s; border: 0.5px solid transparent; }
 .pet-item:hover { background: var(--bg3); }
 .pet-item.active { background: var(--bg3); border-color: var(--border2); }
@@ -31,6 +31,9 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .pet-info { flex: 1; min-width: 0; }
 .pet-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pet-count { font-size: 11px; color: var(--text3); }
+.list-rows { margin: 0 8px; padding: 8px 0 0; border-top: 0.5px solid var(--border); }
+.list-avatar { background: var(--bg); border: 0.5px solid var(--border2); color: var(--text2); }
+#petBar:not([data-kind="pet"]) .pet-only, #petBar:not([data-kind="neg"]) .neg-only { display: none; }
 .add-pet-btn { margin: 8px 8px 3px; padding: 8px 10px; background: transparent; border: 0.5px dashed var(--border2); border-radius: var(--radius-sm); color: var(--text2); cursor: pointer; font-size: 12px; width: calc(100% - 16px); text-align: left; transition: all 0.15s; }
 .add-pet-btn:hover { border-color: var(--accent); color: var(--accent); }
 .add-pet-btn-primary { background: var(--accent); border-color: var(--accent); border-style: solid; color: #fff; }
@@ -65,7 +68,6 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .score-badge { position: absolute; bottom: 4px; left: 4px; width: 30px; height: 30px; border-radius: 50%; background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700; color: #fff; pointer-events: none; }
 .score-badge.score-low { color: var(--danger); }
 .score-badge.score-ok { color: var(--success); }
-.refs-panel { width: 396px; min-width: 396px; border-left: 0.5px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
 .suggest-section { padding: 12px 14px; border-bottom: 0.5px solid var(--border); flex-shrink: 0; }
 .suggest-section .btn { justify-content: center; }
 .refs-header { padding: 12px 16px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
@@ -110,11 +112,8 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 .loading { color: var(--text3); font-size: 12px; padding: 16px; }
-.neg-panel { border-top: 0.5px solid var(--border); padding: 10px; }
-.neg-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.neg-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-auto-rows: 110px; gap: 5px; overflow-y: auto; align-content: start; }
 .tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--bg3); color: var(--text3); border: 0.5px solid var(--border); margin-left: 4px; }
-.sidebar-bottom { border-top: 0.5px solid var(--border); flex-shrink: 0; }
+.sidebar-bottom { margin-top: auto; border-top: 0.5px solid var(--border); flex-shrink: 0; }
 .scan-panel { padding: 10px; border-bottom: 0.5px solid var(--border); }
 .scan-panel label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); display: block; margin-bottom: 6px; }
 .scan-dates { display: grid; grid-template-columns: auto 1fr; gap: 4px 6px; align-items: center; margin-bottom: 6px; }
@@ -145,11 +144,4 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .guide-step-body { flex: 1; }
 .guide-step-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
 .guide-step-desc { font-size: 12px; color: var(--text2); line-height: 1.55; }
-.side-sec { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.side-sec.collapsed { flex: 0 0 auto; }
-.side-sec.collapsed > .neg-grid { display: none; }
-.side-sec.collapsed .neg-header { margin-bottom: 0; }
-.sec-toggle { cursor: pointer; user-select: none; }
-.sec-toggle::before { content: "\25BE\00a0"; }
-.side-sec.collapsed .sec-toggle::before { content: "\25B8\00a0"; }
 .tile-empty { grid-column: 1/-1; font-size: 12px; color: var(--text3); padding: 6px 2px; }
