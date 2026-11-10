@@ -560,13 +560,13 @@ async function skipSelected() {
 // Tile lists shown in the center from the sidebar rows, sharing rendering and removal.
 const TILE_LISTS = {
   neg: {
-    path: '/api/negatives', title: 'Not a pet', glyph: '&#10005;', clearBtn: 'clearNegsBtn', label: 'not a pet',
+    path: '/api/negatives', title: 'Not a pet', glyph: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>', clearBtn: 'clearNegsBtn', label: 'not a pet',
     // The ✕ removes exactly that entry: one crop, or the whole-photo entry.
     removeQuery: a => '?bbox=' + (a.bbox ? a.bbox.join(',') : 'whole'),
     onLoad: assets => { negEntries = assets.map(a => ({ asset_id: a.id, bbox: a.bbox ?? null })); markNegTiles(); },
   },
   skipped: {
-    path: '/api/skipped', title: 'Ignored', glyph: '&#8856;', label: 'ignored',
+    path: '/api/skipped', title: 'Ignored', glyph: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M3.8 12.2l8.4-8.4"/></svg>', label: 'ignored',
     empty: 'No ignored photos', newestFirst: true,
     removedMsg: 'Removed from ignored. It can appear in suggestions again.',
   },
