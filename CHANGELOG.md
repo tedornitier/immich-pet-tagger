@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.10.0
+
+### Changed
+- `GPU_WORKERS` is renamed to `MODEL_WORKERS`, since it also sets the number of inference threads on CPU. `GPU_WORKERS` keeps working when `MODEL_WORKERS` is not set. The shipped `docker-compose.yml` no longer sets it: the default is now 2 on GPU and 1 on CPU (see #62).
+
+### Features
+- Every photo list now has one add button per pet instead of a single "Add to pet", so a photo of another of your pets found while working on one pet can go straight to the right one (see #64).
+- Ignored photos can now be seen and restored. "Not a pet" and "Ignored" are now entries in the sidebar under your pets, and open in the main area like a pet does (see #64).
+- The selected pet's references are now shown in the main area instead of a narrow side column, with the same tile size controls as results. Finders swap the references for their results, and the "References (N)" button brings them back. The right-hand column is gone.
+- "Not a pet" now works on the crop you picked instead of the whole photo. Before, marking a false detection (a blurry background, an object) as "not a pet" in a photo that also showed your pet trained your pet's own crop as a negative too. Existing "not a pet" entries keep covering the whole photo, so nothing you marked before changes.
+
+### Fixed
+- `GPU_WORKERS=0` (or any value below 1) started no inference workers, so every action that needed the models waited 5 minutes and failed with "YOLO worker did not become ready". Values below 1 now count as 1 and log a warning, and the CPU default is now 1 as the README already said (see #62).
+- The startup log line now shows how many inference workers are running, and warnings logged while the app starts now have the normal timestamped format.
+- Two crops of the same photo could share one cached embedding, so a reference crop and another crop of that photo were scored as if they were the same image. Each crop now has its own cache entry. References with a crop are re-embedded once after updating, so the first scan takes a little longer.
+- Thumbnails are now cached by the browser and grid tiles use Immich's small thumbnail size, so switching between pets and lists no longer reloads every photo.
+- Starting a finder while another was still loading could show the older one's results, and low confidence review state could leak into the next finder.
+- "Add manually" for references now merges with the pet's saved references instead of the ones shown on screen, and shows that it is working while the photo is looked up.
+- Editing a pet while a list or the guide was open jumped to the first pet, and renaming the selected pet lost the selection.
+- The getting started guide now shows on its own, centered, and is no longer hidden while a pet is open.
+- A failed crop or thumbnail fetch is now logged instead of failing silently.
+
 ## v1.9.0
 
 ### Features
