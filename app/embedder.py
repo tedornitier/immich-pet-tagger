@@ -23,8 +23,8 @@ from device import inference_workers, is_gpu, pick_device, submit_lock
 
 log = logging.getLogger("embedder")
 
-GPU_WORKERS = inference_workers()
-_default_scan_workers = GPU_WORKERS * 32 if is_gpu(pick_device()) else 8
+MODEL_WORKERS = inference_workers()
+_default_scan_workers = MODEL_WORKERS * 32 if is_gpu(pick_device()) else 8
 SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", _default_scan_workers))
 CLIP_BATCH_SIZE = int(os.environ.get("CLIP_BATCH_SIZE", 32))
 CLIP_MODEL_NAME = os.environ.get("CLIP_MODEL_NAME", "ViT-B-16")
@@ -170,7 +170,7 @@ def _clip_batch_loop(worker_id: int) -> None:
 def _ensure_clip_workers() -> None:
     with _clip_worker_lock:
         alive = [t for t in _clip_worker_threads if t.is_alive()]
-        for i in range(len(alive), GPU_WORKERS):
+        for i in range(len(alive), MODEL_WORKERS):
             t = threading.Thread(target=_clip_batch_loop, args=(i,), daemon=True, name=f"clip-batch-{i}")
             t.start()
             _clip_worker_threads.append(t)

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 # Configured before importing app modules, so warnings they log at import time
-# (e.g. a misconfigured GPU_WORKERS) get the normal format instead of Python's bare fallback.
+# (e.g. a misconfigured MODEL_WORKERS) get the normal format instead of Python's bare fallback.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

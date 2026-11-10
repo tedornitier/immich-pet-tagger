@@ -113,9 +113,9 @@ Constants: YOLO_BATCH_SIZE, YOLO_WORKERS, YOLO_INPUT_SIZE, YOLO_MODEL_NAME, YOLO
 Compute-device selection shared across the inference workers.
 - `pick_device()` L25: Return the best available torch device string: 'cuda', 'mps', or 'cpu'.
 - `is_gpu(device)` L37: True for accelerator devices (used to scale worker counts up from the CPU default).
-- `inference_workers()` L43: Number of YOLO and CLIP worker threads, from GPU_WORKERS (applies on CPU too). Defaults to 2 on GPU, 1 on CPU. Values below 1 would start no workers and make every inference request hang until the ready timeout, so they are clamped to 1.
-- `empty_cache(device)` L62: Release cached device memory back to the driver, when the device supports it.
-- `submit_lock(device)` L70: Context manager serializing GPU submissions on MPS (its single Metal command queue is not thread-safe). A no-op on CUDA/CPU, which handle concurrent submission from multiple worker threads. Hold it around both model loading and inference.
+- `inference_workers()` L43: Number of YOLO and CLIP worker threads, from MODEL_WORKERS (GPU_WORKERS is the old name, still read as a fallback). Defaults to 2 on GPU, 1 on CPU. Values below 1 would start no workers and make every inference request hang until the ready timeout, so they are clamped to 1.
+- `empty_cache(device)` L67: Release cached device memory back to the driver, when the device supports it.
+- `submit_lock(device)` L75: Context manager serializing GPU submissions on MPS (its single Metal command queue is not thread-safe). A no-op on CUDA/CPU, which handle concurrent submission from multiple worker threads. Hold it around both model loading and inference.
 
 ## app/embedder.py
 CLIP batch inference workers and image embedding.
@@ -150,7 +150,7 @@ CLIP batch inference workers and image embedding.
 - `embed_asset_crops(asset_id, require_animal)` L497: Return one embedding per detected animal crop. Falls back to full image if no crops and require_animal is False.
 - `embed_asset(asset_id, require_animal)` L527
 - `resolve_bbox(asset_id)` L532: Return the first YOLO bounding box for an asset, or None if no animal detected.
-Constants: GPU_WORKERS, SCAN_WORKERS, CLIP_BATCH_SIZE, CLIP_MODEL_NAME, CLIP_PRETRAINED, _DEFAULT_CLIP_MODEL_NAME, _DEFAULT_CLIP_PRETRAINED, _DEFAULT_YOLO_MODEL_NAME, MAX_EMBED_CACHE_SIZE, _CLIP_STOP, BENCHMARK_CACHE_SIZE
+Constants: MODEL_WORKERS, SCAN_WORKERS, CLIP_BATCH_SIZE, CLIP_MODEL_NAME, CLIP_PRETRAINED, _DEFAULT_CLIP_MODEL_NAME, _DEFAULT_CLIP_PRETRAINED, _DEFAULT_YOLO_MODEL_NAME, MAX_EMBED_CACHE_SIZE, _CLIP_STOP, BENCHMARK_CACHE_SIZE
 
 ## app/immich.py
 Immich HTTP helpers. Sync functions are used by the poller (runs in a thread). Async functions are used by the API routes.
@@ -191,12 +191,12 @@ Constants: _SCAN_WORKER
 
 ## app/main.py
 Main entrypoint for immich-pet-tagger. Starts the FastAPI enrollment UI and the background polling loop.
-- `async polling_loop()` L39
-- `async lifespan(app)` L57
-- `async health()` L76
-- `async status()` L81
-- `async root()` L101
-- `async accuracy_page()` L106
+- `async polling_loop()` L42
+- `async lifespan(app)` L60
+- `async health()` L79
+- `async status()` L84
+- `async root()` L104
+- `async accuracy_page()` L109
 Constants: BASE_DIR, POLL_INTERVAL, DATA_DIR, LONG_REQUEST_TIMEOUT, NO_CACHE_HEADERS
 
 ## app/poller.py
