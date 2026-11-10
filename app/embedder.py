@@ -19,11 +19,11 @@ import torch
 from PIL import Image
 
 import immich as imm
-from device import is_gpu, pick_device, submit_lock
+from device import inference_workers, is_gpu, pick_device, submit_lock
 
 log = logging.getLogger("embedder")
 
-GPU_WORKERS = int(os.environ.get("GPU_WORKERS", 2))
+GPU_WORKERS = inference_workers()
 _default_scan_workers = GPU_WORKERS * 32 if is_gpu(pick_device()) else 8
 SCAN_WORKERS = int(os.environ.get("SCAN_WORKERS", _default_scan_workers))
 CLIP_BATCH_SIZE = int(os.environ.get("CLIP_BATCH_SIZE", 32))

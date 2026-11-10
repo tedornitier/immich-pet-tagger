@@ -111,10 +111,11 @@ Constants: YOLO_BATCH_SIZE, YOLO_WORKERS, YOLO_INPUT_SIZE, YOLO_MODEL_NAME, YOLO
 
 ## app/device.py
 Compute-device selection shared across the inference workers.
-- `pick_device()` L20: Return the best available torch device string: 'cuda', 'mps', or 'cpu'.
-- `is_gpu(device)` L32: True for accelerator devices (used to scale worker counts up from the CPU default).
-- `empty_cache(device)` L37: Release cached device memory back to the driver, when the device supports it.
-- `submit_lock(device)` L45: Context manager serializing GPU submissions on MPS (its single Metal command queue is not thread-safe). A no-op on CUDA/CPU, which handle concurrent submission from multiple worker threads. Hold it around both model loading and inference.
+- `pick_device()` L25: Return the best available torch device string: 'cuda', 'mps', or 'cpu'.
+- `is_gpu(device)` L37: True for accelerator devices (used to scale worker counts up from the CPU default).
+- `inference_workers()` L43: Number of YOLO and CLIP worker threads, from GPU_WORKERS (applies on CPU too). Defaults to 2 on GPU, 1 on CPU. Values below 1 would start no workers and make every inference request hang until the ready timeout, so they are clamped to 1.
+- `empty_cache(device)` L62: Release cached device memory back to the driver, when the device supports it.
+- `submit_lock(device)` L70: Context manager serializing GPU submissions on MPS (its single Metal command queue is not thread-safe). A no-op on CUDA/CPU, which handle concurrent submission from multiple worker threads. Hold it around both model loading and inference.
 
 ## app/embedder.py
 CLIP batch inference workers and image embedding.
