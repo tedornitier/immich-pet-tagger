@@ -18,8 +18,10 @@ Uses CLIP embeddings and a few reference photos you provide. No cloud services, 
 
 - **Import from Immich**: if Immich already recognizes your pet as a person, import them in one click. The tool picks up to 20 evenly distributed reference photos automatically.
 - **Find references**: uses a two-stage search to surface candidates. Your reference photos are used as visual queries against Immich's smart search, and the local classifier re-ranks the results by pet probability. Falls back to text search using your description when no refs exist yet.
+- **One button per pet**: every photo list shows an add button for each of your pets, so a photo of another pet found while working on one can go straight to the right one.
+- **Not a pet**: mark detections that are none of your pets, like empty rooms, objects or other species, so the classifier learns what not to tag. It works on the crop you pick, so marking a false detection doesn't affect your pet in the same photo. A look-alike animal that isn't yours is better ignored than marked, since it would blur the line between it and your pet.
 - **Find candidates for "not a pet"**: samples 50 random photos from your library, scores them with the classifier, and shows the ones it is unsure about for bulk review.
-- **Negative samples**: mark photos that look like your pet but aren't, to sharpen the classifier's ability to reject false positives.
+- **Ignored list**: photos you ignore stop showing up in suggestions. You can see and restore them from **Ignored** in the sidebar.
 - **Date ranges**: restrict a pet to photos taken within a specific period (useful for pets that have passed away or were adopted later).
 - **Scan controls**: set the scan start date and trigger a scan from the sidebar; the last scan stats are shown live.
 - **Manage pets**: rename a pet, remove it from Pet Tagger only (keeps it and its tags in Immich untouched, so you can re-import later), delete it entirely (also removes the person and all its tags from Immich), or reset its Immich tags (untags every photo but keeps your curated reference photos so you can start tagging fresh).
