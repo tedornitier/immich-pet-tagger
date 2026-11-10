@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=7">
+<link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -47,7 +47,7 @@
               <button class="btn" onclick="changeTileSize(40)">+</button>
             </div>
             <span id="selCount" style="font-size:12px; color:var(--text3);"></span>
-            <div id="petBtns" style="display:none; gap:4px; flex-wrap:wrap;"></div>
+            <div id="petBtns" style="display:none; gap:4px;"></div>
             <button class="btn" id="skipBtn" onclick="skipSelected()" style="display:none" title="Blurry, distant, another person or animal visible alongside your pet, or a look-alike that is not yours. Ignored photos won't appear again.">Ignore</button>
             <button class="btn btn-danger" id="addNegBtn" onclick="addSelectedAsNegatives()" style="display:none" title="Photos that could confuse the classifier. Empty rooms, other species, ambiguous shots. Around 50 is enough.">Not a pet</button>
           </div>
