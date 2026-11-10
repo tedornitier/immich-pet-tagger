@@ -1362,6 +1362,7 @@ async def list_immich_people():
 # Only successful responses are cacheable, so a failed fetch is retried next time.
 ASSET_IMAGE_CACHE = {"Cache-Control": "private, max-age=604800, immutable"}
 PERSON_IMAGE_CACHE = {"Cache-Control": "private, max-age=3600"}
+CROP_TILE_MAX = 512  # max side in px of a crop sent to the UI
 
 
 def _cache_if_ok(status_code: int, headers: dict) -> dict:
@@ -1402,13 +1403,19 @@ async def get_asset_crops(asset_id: str):
     return {**_slim_asset(meta), "crops": crops}
 
 
-@router.get("/thumb/{asset_id}")
-async def thumbnail(asset_id: str):
+async def _grid_thumbnail(asset_id: str) -> StreamingResponse:
+    """Immich's small thumbnail (about 250px) for grid tiles. The large preview size is only
+    needed as a source for crops and for embedding (embedder.fetch_thumbnail)."""
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=preview", headers=imm.headers())
+        resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=thumbnail", headers=imm.headers())
     return StreamingResponse(resp.aiter_bytes(), status_code=resp.status_code,
                              media_type=resp.headers.get("content-type", "image/jpeg"),
                              headers=_cache_if_ok(resp.status_code, ASSET_IMAGE_CACHE))
+
+
+@router.get("/thumb/{asset_id}")
+async def thumbnail(asset_id: str):
+    return await _grid_thumbnail(asset_id)
 
 
 @router.get("/crop/{asset_id}")
@@ -1422,7 +1429,9 @@ async def animal_crop(asset_id: str, bbox: str | None = None):
                 if img is None:
                     return None
                 w, h = img.size
-                return img.crop((int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)))
+                crop = img.crop((int(x1 * w), int(y1 * h), int(x2 * w), int(y2 * h)))
+                crop.thumbnail((CROP_TILE_MAX, CROP_TILE_MAX))  # tiles are small, keep the download light
+                return crop
             crop = await asyncio.to_thread(do_crop)
             if crop is not None:
                 buf = io.BytesIO()
@@ -1431,8 +1440,4 @@ async def animal_crop(asset_id: str, bbox: str | None = None):
                 return StreamingResponse(buf, media_type="image/jpeg", headers=ASSET_IMAGE_CACHE)
         except Exception:
             pass
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(f"{imm.IMMICH_URL}/api/assets/{asset_id}/thumbnail?size=preview", headers=imm.headers())
-    return StreamingResponse(resp.aiter_bytes(), status_code=resp.status_code,
-                             media_type=resp.headers.get("content-type", "image/jpeg"),
-                             headers=_cache_if_ok(resp.status_code, ASSET_IMAGE_CACHE))
+    return await _grid_thumbnail(asset_id)
