@@ -437,12 +437,25 @@ async def remove_negative(asset_id: str):
 # Skipped
 # ---------------------------------------------------------------------------
 
+@router.get("/skipped")
+async def get_skipped():
+    ids = data.load_skipped_ids(DATA_DIR)
+    return {"assets": [{"id": aid, "thumb": f"/api/thumb/{aid}"} for aid in ids], "count": len(ids)}
+
+
 @router.post("/skipped")
 async def add_skipped(body: PetAssets):
-    existing = set(data.load_skipped_ids(DATA_DIR))
-    merged = list(existing | set(body.asset_ids))
+    existing = data.load_skipped_ids(DATA_DIR)
+    merged = list(dict.fromkeys(existing + body.asset_ids))  # keep order, newest last
     data.save_skipped_ids(merged, DATA_DIR)
     return {"count": len(merged)}
+
+
+@router.delete("/skipped/{asset_id}")
+async def remove_skipped(asset_id: str):
+    ids = [i for i in data.load_skipped_ids(DATA_DIR) if i != asset_id]
+    data.save_skipped_ids(ids, DATA_DIR)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

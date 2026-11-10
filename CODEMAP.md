@@ -27,42 +27,44 @@ API routes for the enrollment UI. All Immich communication happens here; the bro
 - `async clear_pet_refs(name)` L412
 - `async clear_all_negatives()` L423
 - `async remove_negative(asset_id)` L430
-- `async add_skipped(body)` L441
-- `async get_pet_assets(name)` L453
-- `async set_pet_assets(name, body)` L474
-- `_other_pets_have_asset(config, exclude_name, asset_id)` L541: True if some pet other than exclude_name still has a ref on asset_id, meaning the photo still carries a face this tool wrote and shouldn't lose its review tag.
-- `async _untag_pet_refs(client, config, name, refs)` L553: Strip the review tag from every ref's asset after that pet's Immich person is gone, skipping any asset another pet still has a face on. Shared by delete_pet and reset_pet_immich so the untag step can't drift out of sync between the two.
-- `async remove_pet_asset(name, asset_id, crop_idx)` L563
-- `_classifier_fingerprint(pet_names, refs_per_pet, negative_ids)` L597: Stable hash of the inputs that define a trained classifier.
-- `_build_classifier_from_config(config)` L606: Load all pet refs and return (names, clf, scaler), or None if no pets have refs.
-- `_finder_error(summary, errors_before)` L634: Error for a finder that could not score anything: summary plus the model failure recorded since errors_before, if any. build_response turns it into a 503.
-- `async get_suggestions(name, limit)` L642
-- `async get_borderline(name, limit)` L710
-- `async get_borderline_progress(name)` L792
-- `class BenchmarkRequest` L799
-- `async start_benchmark(body)` L806: Diagnostic, not part of the tagging pipeline: dry-run classify every asset (photo and video) in the given date range and compare against the actual Immich tags (source of truth). Runs in the background since a full library can take several minutes; poll GET /analysis/benchmark for progress and the result. See accuracy.html.
-- `async stop_benchmark()` L836: Cancels an in-progress benchmark. Whatever was already classified before the cancel is still assembled into a usable result (same as a completed run), not discarded, since a partial answer over most of the range beats none at all.
-- `async get_benchmark()` L846
-- `async set_benchmark_result(body)` L851: Store an externally-provided result (e.g. a file re-imported in accuracy.html) as the current one, so /download can serve it back too, not just freshly-run results.
-- `async download_benchmark()` L859: Serves the current result as a file attachment via Content-Disposition instead of a client-side blob URL: some browsers don't reliably honor the <a download> attribute on blob: URLs, silently saving with the blob's internal id and no extension instead. Filename encodes the run's YOLO confidence and date range, not just today's date, so several downloaded results sitting in the same folder stay distinguishable at a glance without having to open each one.
-- `_benchmark_bucket(asset_type, yolo_detected)` L891: Split by detected vs whole-image fallback, and by photo vs video (a video only ever classifies a single sampled frame, so its numbers behave differently from a photo's). A strong/weak split by detection confidence was tried and measured worse: at matched recall, splitting out a separate 'weak' tier and giving it its own threshold produced a higher false-positive rate than just raising the YOLO_CONF floor and using one threshold for every detection.
-- `async _run_benchmark(generation, since, until, yolo_conf_override)` L904
-- `async get_neg_candidates(limit)` L1016
-- `async get_neg_progress()` L1096
-- `async get_poll_status()` L1105
-- `class PetImport` L1109
-- `async import_pet(body)` L1118
-- `class ScanRequest` L1183
-- `async trigger_scan(body)` L1189
-- `async stop_scan()` L1202
-- `async _run_manual_scan(generation, scan_since, scan_until)` L1211
-- `async get_scan_result()` L1246
-- `async get_scan_low_confidence()` L1257
-- `async list_immich_people()` L1288
-- `async person_thumbnail(person_id)` L1303
-- `async get_asset_crops(asset_id)` L1316: Look up one asset by ID and return its detected animal crops, so a user can manually add a reference or negative by pasting an Immich photo link or ID.
-- `async thumbnail(asset_id)` L1336
-- `async animal_crop(asset_id, bbox)` L1343: Return a cropped animal region by bbox (x1,y1,x2,y2 normalized), or the full thumbnail.
+- `async get_skipped()` L441
+- `async add_skipped(body)` L447
+- `async remove_skipped(asset_id)` L455
+- `async get_pet_assets(name)` L466
+- `async set_pet_assets(name, body)` L487
+- `_other_pets_have_asset(config, exclude_name, asset_id)` L554: True if some pet other than exclude_name still has a ref on asset_id, meaning the photo still carries a face this tool wrote and shouldn't lose its review tag.
+- `async _untag_pet_refs(client, config, name, refs)` L566: Strip the review tag from every ref's asset after that pet's Immich person is gone, skipping any asset another pet still has a face on. Shared by delete_pet and reset_pet_immich so the untag step can't drift out of sync between the two.
+- `async remove_pet_asset(name, asset_id, crop_idx)` L576
+- `_classifier_fingerprint(pet_names, refs_per_pet, negative_ids)` L610: Stable hash of the inputs that define a trained classifier.
+- `_build_classifier_from_config(config)` L619: Load all pet refs and return (names, clf, scaler), or None if no pets have refs.
+- `_finder_error(summary, errors_before)` L647: Error for a finder that could not score anything: summary plus the model failure recorded since errors_before, if any. build_response turns it into a 503.
+- `async get_suggestions(name, limit)` L655
+- `async get_borderline(name, limit)` L723
+- `async get_borderline_progress(name)` L805
+- `class BenchmarkRequest` L812
+- `async start_benchmark(body)` L819: Diagnostic, not part of the tagging pipeline: dry-run classify every asset (photo and video) in the given date range and compare against the actual Immich tags (source of truth). Runs in the background since a full library can take several minutes; poll GET /analysis/benchmark for progress and the result. See accuracy.html.
+- `async stop_benchmark()` L849: Cancels an in-progress benchmark. Whatever was already classified before the cancel is still assembled into a usable result (same as a completed run), not discarded, since a partial answer over most of the range beats none at all.
+- `async get_benchmark()` L859
+- `async set_benchmark_result(body)` L864: Store an externally-provided result (e.g. a file re-imported in accuracy.html) as the current one, so /download can serve it back too, not just freshly-run results.
+- `async download_benchmark()` L872: Serves the current result as a file attachment via Content-Disposition instead of a client-side blob URL: some browsers don't reliably honor the <a download> attribute on blob: URLs, silently saving with the blob's internal id and no extension instead. Filename encodes the run's YOLO confidence and date range, not just today's date, so several downloaded results sitting in the same folder stay distinguishable at a glance without having to open each one.
+- `_benchmark_bucket(asset_type, yolo_detected)` L904: Split by detected vs whole-image fallback, and by photo vs video (a video only ever classifies a single sampled frame, so its numbers behave differently from a photo's). A strong/weak split by detection confidence was tried and measured worse: at matched recall, splitting out a separate 'weak' tier and giving it its own threshold produced a higher false-positive rate than just raising the YOLO_CONF floor and using one threshold for every detection.
+- `async _run_benchmark(generation, since, until, yolo_conf_override)` L917
+- `async get_neg_candidates(limit)` L1029
+- `async get_neg_progress()` L1109
+- `async get_poll_status()` L1118
+- `class PetImport` L1122
+- `async import_pet(body)` L1131
+- `class ScanRequest` L1196
+- `async trigger_scan(body)` L1202
+- `async stop_scan()` L1215
+- `async _run_manual_scan(generation, scan_since, scan_until)` L1224
+- `async get_scan_result()` L1259
+- `async get_scan_low_confidence()` L1270
+- `async list_immich_people()` L1301
+- `async person_thumbnail(person_id)` L1316
+- `async get_asset_crops(asset_id)` L1329: Look up one asset by ID and return its detected animal crops, so a user can manually add a reference or negative by pasting an Immich photo link or ID.
+- `async thumbnail(asset_id)` L1349
+- `async animal_crop(asset_id, bbox)` L1356: Return a cropped animal region by bbox (x1,y1,x2,y2 normalized), or the full thumbnail.
 Constants: IMMICH_EXTERNAL_URL, DATA_DIR, PETS_DIR, LONG_REQUEST_TIMEOUT, KEEPALIVE_INTERVAL, _VERSION_FILE, BENCHMARK_BUCKETS, SWEEP_SCORE_FLOOR
 
 ## app/classifier.py
@@ -225,69 +227,73 @@ Standalone entry point for running one poll cycle in an isolated OS process.
 - `changeTileSize` L27
 - `escapeHtml` L34
 - `refreshState` L38
-- `loadPets` L58
-- `renderSidebar` L70
-- `showGuide` L94
-- `clearSearch` L110
-- `selectPet` L116
-- `loadRefs` L134
-- `renderRefs` L144
-- `removeRef` L158
-- `assignSelectedTo` L182
-- `renderPetBtns` L207
-- `getCropData` L217
-- `renderPhotoItems` L223
-- `markGridItems` L247
-- `viewFindRefs` L265
-- `parseAssetId` L277
-- `_openAddByIdModal` L286
-- `openAddById` L311
-- `openAddNegById` L312
-- `closeAddById` L314
-- `submitAddById` L319
-- `viewSuggestions` L381
-- `viewBorderline` L406
-- `toggleSelect` L452
-- `updateSelUI` L476
-- `skipSelected` L486
-- `updateNegStatus` L502
-- `loadNegatives` L508
-- `addSelectedAsNegatives` L526
-- `viewNegCandidates` L543
-- `clearAllRefs` L589
-- `clearAllNegatives` L602
-- `removeNegative` L612
-- `fmtDate` L626
-- `relativeTime` L633
-- `prefillScanUntil` L646
-- `loadScanResult` L651
-- `showScanResult` L655
-- `viewScanLowConf` L704
-- `renderScanLowConfFilterBtns` L732
-- `dropScanLowConf` L747
-- `renderScanLowConf` L756
-- `applyTimestamp` L767
-- `stopScan` L786
-- `modalError` L799
-- `clearModalError` L800
-- `openAddPet` L802
-- `closeModal` L807
-- `submitAddPet` L809
-- `openEditPet` L832
-- `closeEditModal` L842
-- `submitEditPet` L844
-- `openDeletePet` L871
-- `closeDeleteModal` L881
-- `confirmDeletePet` L883
-- `confirmResetPet` L900
-- `openImportPet` L917
-- `renderImportPeople` L933
-- `filterImportPeople` L947
-- `handlePersonCardClick` L952
-- `closeImportPicker` L967
-- `closeImportDetail` L968
-- `backToImportPicker` L969
-- `submitImportPet` L971
+- `loadPets` L59
+- `renderSidebar` L71
+- `showGuide` L95
+- `clearSearch` L111
+- `selectPet` L117
+- `loadRefs` L135
+- `renderRefs` L145
+- `removeRef` L159
+- `assignSelectedTo` L183
+- `renderPetBtns` L208
+- `getCropData` L218
+- `renderPhotoItems` L224
+- `markGridItems` L248
+- `viewFindRefs` L266
+- `parseAssetId` L278
+- `_openAddByIdModal` L287
+- `openAddById` L312
+- `openAddNegById` L313
+- `closeAddById` L315
+- `submitAddById` L320
+- `viewSuggestions` L382
+- `viewBorderline` L407
+- `toggleSelect` L453
+- `updateSelUI` L477
+- `skipSelected` L487
+- `applyCollapsed` L508
+- `toggleSec` L511
+- `updateNegStatus` L518
+- `loadTileList` L538
+- `loadNegatives` L560
+- `loadIgnored` L561
+- `removeTile` L563
+- `addSelectedAsNegatives` L573
+- `viewNegCandidates` L590
+- `clearAllRefs` L636
+- `clearAllNegatives` L649
+- `fmtDate` L663
+- `relativeTime` L670
+- `prefillScanUntil` L683
+- `loadScanResult` L688
+- `showScanResult` L692
+- `viewScanLowConf` L741
+- `renderScanLowConfFilterBtns` L769
+- `dropScanLowConf` L784
+- `renderScanLowConf` L793
+- `applyTimestamp` L804
+- `stopScan` L823
+- `modalError` L836
+- `clearModalError` L837
+- `openAddPet` L839
+- `closeModal` L844
+- `submitAddPet` L846
+- `openEditPet` L869
+- `closeEditModal` L879
+- `submitEditPet` L881
+- `openDeletePet` L908
+- `closeDeleteModal` L918
+- `confirmDeletePet` L920
+- `confirmResetPet` L937
+- `openImportPet` L954
+- `renderImportPeople` L970
+- `filterImportPeople` L984
+- `handlePersonCardClick` L989
+- `closeImportPicker` L1004
+- `closeImportDetail` L1005
+- `backToImportPicker` L1006
+- `submitImportPet` L1008
 
 ## scripts/gen_codemap.py
 Generate CODEMAP.md: an index of functions/classes with line numbers.

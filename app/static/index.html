@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Immich Pet Tagger</title>
-<link rel="stylesheet" href="/static/style.css?v=6">
+<link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
 <div class="models-banner" id="modelsBanner"></div>
@@ -56,22 +56,24 @@
         <div class="photo-grid" id="photoGrid"></div>
       </div>
       <div class="refs-panel">
-        <div class="refs-header">
-          <span style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);" id="refsTitle">No pet selected</span>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <button class="btn btn-primary" id="findRefsBtn" onclick="viewFindRefs()" style="display:none; font-size:12px; padding:5px 10px;">Find references</button>
-            <button class="btn" id="addByIdBtn" onclick="openAddById()" style="display:none; font-size:12px; padding:5px 10px;">Add manually</button>
-            <button class="btn btn-danger" id="clearRefsBtn" onclick="clearAllRefs()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
+        <div class="side-sec" data-sec="refs">
+          <div class="refs-header">
+            <span class="sec-toggle" onclick="toggleSec('refs')" style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);" id="refsTitle">No pet selected</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button class="btn btn-primary" id="findRefsBtn" onclick="viewFindRefs()" style="display:none; font-size:12px; padding:5px 10px;">Find references</button>
+              <button class="btn" id="addByIdBtn" onclick="openAddById()" style="display:none; font-size:12px; padding:5px 10px;">Add manually</button>
+              <button class="btn btn-danger" id="clearRefsBtn" onclick="clearAllRefs()" style="display:none; font-size:12px; padding:5px 10px;">Clear all</button>
+            </div>
+          </div>
+          <div class="refs-grid" id="refsGrid">
+            <div class="empty" style="grid-column:1/-1; height:200px;">
+              <div class="empty-sub">Select a pet</div>
+            </div>
           </div>
         </div>
-        <div class="refs-grid" id="refsGrid">
-          <div class="empty" style="grid-column:1/-1; height:200px;">
-            <div class="empty-sub">Select a pet</div>
-          </div>
-        </div>
-        <div class="neg-panel">
+        <div class="neg-panel side-sec" data-sec="neg">
           <div class="neg-header">
-            <span style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);">Not a pet <span style="font-weight:400;" id="negCount">0</span></span>
+            <span class="sec-toggle" onclick="toggleSec('neg')" style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);">Not a pet <span style="font-weight:400;" id="negCount">0</span></span>
             <div style="display:flex; gap:6px; align-items:center;">
               <button class="btn" id="findNegsBtn" onclick="viewNegCandidates()" style="font-size:12px; padding:5px 10px;">Find candidates</button>
               <button class="btn" id="addNegByIdBtn" onclick="openAddNegById()" style="font-size:12px; padding:5px 10px;">Add manually</button>
@@ -79,6 +81,12 @@
             </div>
           </div>
           <div class="neg-grid" id="negGrid"></div>
+        </div>
+        <div class="neg-panel side-sec" data-sec="ignored">
+          <div class="neg-header">
+            <span class="sec-toggle" onclick="toggleSec('ignored')" style="font-size:11px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text3);">Ignored <span style="font-weight:400;" id="ignoredCount">0</span></span>
+          </div>
+          <div class="neg-grid" id="ignoredGrid"></div>
         </div>
       </div>
     </div>
@@ -230,6 +238,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js?v=13"></script>
+<script src="/static/app.js?v=14"></script>
 </body>
 </html>
