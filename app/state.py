@@ -14,6 +14,14 @@ benchmark_progress: dict = {"current": 0, "total": 0, "running": False}
 benchmark_generation: int = 0
 benchmark_cancel: threading.Event = threading.Event()
 benchmark_result: dict | None = None
+refanalysis_progress: dict = {"current": 0, "total": 0, "running": False}
+refanalysis_generation: int = 0
+refanalysis_cancel: threading.Event = threading.Event()
+refanalysis_result: dict | None = None
+neganalysis_progress: dict = {"current": 0, "total": 0, "running": False}
+neganalysis_generation: int = 0
+neganalysis_cancel: threading.Event = threading.Event()
+neganalysis_result: dict | None = None
 
 # Trained classifier cache shared across API endpoints. Rebuilt only when the
 # set of refs or negatives changes (tracked via fingerprint). Reusing the same

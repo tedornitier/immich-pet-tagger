@@ -1,0 +1,445 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Reference photo analysis</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; background:#111; color:#eee; margin:0; padding:24px; }
+  h1 { font-weight:600; }
+  h2 { margin-top:32px; font-weight:600; }
+  .count { color:#888; font-weight:400; font-size:0.8em; }
+  a.back { color:#6cf; text-decoration:none; font-size:13px; }
+  a.back:hover { text-decoration:underline; }
+  p.note { color:#999; max-width:760px; line-height:1.5; }
+  p.warning { color:#e8a33d; max-width:760px; border-left:3px solid #e8a33d; padding-left:10px; }
+  form { display:flex; gap:8px 16px; align-items:center; margin:16px 0; flex-wrap:wrap; }
+  input, button, select { font-size:13px; padding:4px 8px; }
+  #status { color:#999; margin:8px 0; }
+  #configLine { color:#888; font-size:12px; margin-top:8px; }
+  #summary { margin:14px 0; }
+  .legend { display:flex; gap:10px 18px; flex-wrap:wrap; font-size:12px; color:#bbb; max-width:900px;
+            border:1px solid #333; border-radius:6px; padding:10px 12px; margin:12px 0; }
+  .legend div { flex:1 1 260px; }
+  .legend b { color:#eee; }
+  .controls { display:flex; gap:8px 14px; align-items:center; margin:10px 0; flex-wrap:wrap; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, 150px); gap:12px; }
+  .card { text-decoration:none; color:#ccc; font-size:11px; display:block; }
+  .card img { width:150px; height:150px; object-fit:cover; border-radius:6px; background:#222; display:block; }
+  .card:hover img { outline:2px solid #6cf; }
+  .card .verdict { display:block; margin-top:5px; padding:1px 5px; border-radius:3px; font-size:10.5px;
+                   font-weight:600; text-align:center; }
+  .card .metrics { margin-top:4px; display:flex; flex-direction:column; gap:1px; }
+  .card .metric { display:flex; justify-content:space-between; }
+  .card .metric .k { color:#888; }
+  .card .metric .v { color:#ddd; font-variant-numeric:tabular-nums; }
+  .v.good { color:#7ddc7d; } .v.bad { color:#f08a8a; } .v.warn { color:#e8b84d; }
+  /* verdict colors */
+  .verdict.harmful { background:#5a2530; color:#ff9db0; }
+  .verdict.outlier { background:#5a4520; color:#ffd07a; }
+  .verdict.duplicate { background:#4a4520; color:#e6d98a; }
+  .verdict.loadbearing { background:#204a2a; color:#8fe6a0; }
+  .verdict.redundant { background:#333; color:#aaa; }
+  .verdict.ok { background:#2a3340; color:#9bb4cc; }
+  .verdict.skip { background:#2a2a2a; color:#888; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:10px; font-size:12px; margin-right:6px; }
+  .subnote { font-size:11px; color:#888; margin-top:2px; }
+</style>
+</head>
+<body>
+<a class="back" href="/">&larr; Back to Pet Tagger</a>
+<h1>Reference photo analysis</h1>
+<p class="note">Scores every reference photo by how much it actually contributes to the classifier, so you can
+prune dead weight and catch bad crops. It uses whichever reference and negative photos are set up on the main
+enrollment page (edit refs there and re-run here to see the effect). Nothing is changed &mdash; this is read-only
+diagnostics. A run embeds each ref and, for each one, retrains the model without it (leave-one-out); ref sets are
+small so this is quick.</p>
+<div class="legend">
+  <div><b>Redundancy</b> &mdash; how similar this ref's embedding is to the pet's <i>other</i> refs (cosine, 0&ndash;100%).
+    High means a near-duplicate carrying little new information.</div>
+  <div><b>Self</b> &mdash; the model's confidence for the pet on this ref's crop <i>when it was held out of training</i>.
+    Low means the other refs don't explain it: a genuinely informative hard case, or a bad crop.</div>
+  <div><b>Influence</b> &mdash; the log-odds shift in the pet's <i>other</i> refs when this one is removed.
+    Positive = load-bearing (removing it hurts); near zero = contributes little; <i>negative</i> = removing it
+    <i>helps</i>, i.e. it's pulling the boundary the wrong way (likely a bad or mislabeled ref). On a clean,
+    well-separated set every ref lands close to zero &mdash; that's expected; watch for the outliers, especially
+    negative ones.</div>
+</div>
+<h2>Reference photos</h2>
+<form id="runForm">
+  <button type="submit" id="runBtn">Run analysis</button>
+  <button type="button" id="stopBtn" style="display:none;">Stop</button>
+</form>
+<div id="status"></div>
+<div id="configLine"></div>
+<div id="summary"></div>
+<div class="controls" id="controls" style="display:none;">
+  <label>Sort by
+    <select id="sortSel">
+      <option value="influence_asc">Influence (most harmful first)</option>
+      <option value="self_asc">Self score (lowest first)</option>
+      <option value="redundancy_desc">Redundancy (highest first)</option>
+    </select>
+  </label>
+</div>
+<div id="pets"></div>
+
+<h2>&ldquo;Not a pet&rdquo; photos</h2>
+<p class="note">The same idea for your negative samples. Here a <b>high</b> held-out score is what makes a negative
+<i>valuable</i>: it means the model would mistake it for a pet, so keeping it teaches the classifier to reject that
+look-alike. Negatives that are trivially &ldquo;not a pet&rdquo; anchor the class but do little discriminating work,
+and near-duplicate negatives are wasted slots.</p>
+<div class="legend">
+  <div><b>Pet-likeness</b> &mdash; how strongly the model takes this photo for a pet when it's held out of training
+    (and which pet). High = a hard negative doing real work rejecting false positives; low = easy filler. The small
+    number after &ldquo;most like N&rdquo; is the raw cosine similarity of this photo to that pet's reference photos
+    &mdash; a model-free &ldquo;how close does it look&rdquo;, separate from the classifier's own score.</div>
+  <div><b>Redundancy</b> &mdash; cosine similarity to the most similar <i>other</i> negative. High means a
+    near-duplicate you could drop.</div>
+</div>
+<form id="negRunForm">
+  <button type="submit" id="negRunBtn">Run analysis</button>
+  <button type="button" id="negStopBtn" style="display:none;">Stop</button>
+</form>
+<div id="negStatus"></div>
+<div id="negConfigLine"></div>
+<div id="negSummary"></div>
+<div class="controls" id="negControls" style="display:none;">
+  <label>Sort by
+    <select id="negSortSel">
+      <option value="pet_likeness_desc">Pet-likeness (most pet-like first)</option>
+      <option value="redundancy_desc">Redundancy (highest first)</option>
+    </select>
+  </label>
+</div>
+<div id="negs"></div>
+<script>
+const statusEl = document.getElementById('status');
+const configEl = document.getElementById('configLine');
+const summaryEl = document.getElementById('summary');
+const petsEl = document.getElementById('pets');
+const controlsEl = document.getElementById('controls');
+const sortSel = document.getElementById('sortSel');
+const runBtn = document.getElementById('runBtn');
+const stopBtn = document.getElementById('stopBtn');
+
+// Verdict thresholds. These only shape the labels/colors on the client; the raw numbers
+// are always shown, so tuning these never hides the underlying signal. Influence is a
+// log-odds shift (see fmtInfluence): on well-separated refs every clean ref lands around
+// +0.02..+0.05, so "harmful" keys off a clearly negative sign rather than a magnitude.
+const HARMFUL_INFLUENCE = -0.03;   // removing the ref raises the others' confidence
+const LOADBEARING_INFLUENCE = 0.15;
+const NEGLIGIBLE_INFLUENCE = 0.03;
+const LOW_SELF = 0.4;
+const DUP_REDUNDANCY = 0.95;
+const HIGH_REDUNDANCY = 0.9;
+
+const VERDICTS = {
+  harmful:     {cls: 'harmful',     label: 'Harmful'},
+  outlier:     {cls: 'outlier',     label: 'Outlier / check crop'},
+  duplicate:   {cls: 'duplicate',   label: 'Near-duplicate'},
+  loadbearing: {cls: 'loadbearing', label: 'Load-bearing'},
+  redundant:   {cls: 'redundant',   label: 'Redundant'},
+  ok:          {cls: 'ok',          label: 'OK'},
+  skip:        {cls: 'skip',        label: 'Not embedded'},
+};
+
+function verdictKey(r) {
+  if (!r.embedded) return 'skip';
+  if (r.influence !== null && r.influence < HARMFUL_INFLUENCE) return 'harmful';
+  if (r.self_score !== null && r.self_score < LOW_SELF) return 'outlier';
+  if (r.redundancy !== null && r.redundancy > DUP_REDUNDANCY) return 'duplicate';
+  if (r.influence !== null && r.influence > LOADBEARING_INFLUENCE) return 'loadbearing';
+  if (r.redundancy !== null && r.redundancy > HIGH_REDUNDANCY &&
+      (r.influence === null || r.influence < NEGLIGIBLE_INFLUENCE)) return 'redundant';
+  return 'ok';
+}
+
+function pct(v) { return v === null ? '&ndash;' : (v * 100).toFixed(0) + '%'; }
+// Influence is a log-odds delta, not a probability, so it is shown as a signed raw number.
+// On well-separated refs the values are small (a fraction of a nat); the sign and relative
+// size are what matter, so 3 decimals keeps clean refs distinguishable from each other.
+function fmtInfluence(v) {
+  if (v === null) return '&ndash;';
+  const sign = v > 0 ? '+' : (v < 0 ? '−' : '');
+  return sign + Math.abs(v).toFixed(3);
+}
+
+function cropUrl(r) {
+  if (r.bbox && r.bbox.length === 4) return `/api/crop/${r.asset_id}?bbox=${r.bbox.join(',')}`;
+  return `/api/crop/${r.asset_id}`;
+}
+
+function cardHtml(r) {
+  const v = VERDICTS[verdictKey(r)];
+  const redCls = r.redundancy !== null && r.redundancy > DUP_REDUNDANCY ? 'bad'
+               : r.redundancy !== null && r.redundancy > HIGH_REDUNDANCY ? 'warn' : '';
+  const selfCls = r.self_score !== null && r.self_score < LOW_SELF ? 'bad'
+                : r.self_score !== null && r.self_score < 0.6 ? 'warn' : 'good';
+  const inflCls = r.influence === null ? ''
+                : r.influence < HARMFUL_INFLUENCE ? 'bad'
+                : r.influence > LOADBEARING_INFLUENCE ? 'good' : '';
+  const vecNote = r.n_vecs > 1 ? ` <span class="k">(${r.n_vecs} crops)</span>` : '';
+  return `<a class="card" href="${window._immichUrl || ''}/photos/${r.asset_id}" target="_blank">
+    <img src="${cropUrl(r)}" loading="lazy">
+    <span class="verdict ${v.cls}">${v.label}</span>
+    <div class="metrics">
+      <div class="metric"><span class="k">Redundancy</span><span class="v ${redCls}">${pct(r.redundancy)}</span></div>
+      <div class="metric"><span class="k">Self</span><span class="v ${selfCls}">${pct(r.self_score)}</span></div>
+      <div class="metric"><span class="k">Influence</span><span class="v ${inflCls}">${fmtInfluence(r.influence)}</span></div>
+    </div>
+    <div class="subnote">${vecNote}</div>
+  </a>`;
+}
+
+function sortRefs(refs, mode) {
+  const arr = [...refs];
+  const key = mode.startsWith('influence') ? 'influence'
+            : mode.startsWith('self') ? 'self_score' : 'redundancy';
+  const dir = mode.endsWith('desc') ? -1 : 1;
+  arr.sort((a, b) => {
+    const av = a[key], bv = b[key];
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;   // nulls always last
+    if (bv === null) return -1;
+    return (av - bv) * dir;
+  });
+  return arr;
+}
+
+let lastResult = null;
+
+function renderSummary(result) {
+  const cfg = result.config;
+  const counts = {};
+  for (const pet of Object.values(result.pets)) {
+    for (const r of pet.refs) {
+      const k = verdictKey(r);
+      counts[k] = (counts[k] || 0) + 1;
+    }
+  }
+  const order = ['harmful', 'outlier', 'duplicate', 'redundant', 'loadbearing', 'ok', 'skip'];
+  const pills = order.filter(k => counts[k]).map(k =>
+    `<span class="pill verdict ${VERDICTS[k].cls}">${counts[k]} ${VERDICTS[k].label}</span>`).join('');
+  summaryEl.innerHTML = pills;
+  configEl.textContent = `Models: CLIP ${cfg.clip_model} (${cfg.clip_pretrained}), YOLO ${cfg.yolo_model}. `
+    + `${cfg.n_refs} refs across ${cfg.n_pets} pet(s), ${cfg.n_ref_vecs} embedded crops, ${cfg.n_negatives} negative crops.`
+    + (cfg.partial ? ' Stopped early: some refs have no leave-one-out scores yet.' : '');
+}
+
+function renderPets() {
+  if (!lastResult) { petsEl.innerHTML = ''; controlsEl.style.display = 'none'; return; }
+  const mode = sortSel.value;
+  const names = Object.keys(lastResult.pets).sort();
+  petsEl.innerHTML = names.map(name => {
+    const refs = sortRefs(lastResult.pets[name].refs, mode);
+    const cards = refs.map(cardHtml).join('');
+    return `<h2>${name} <span class="count">(${refs.length} refs)</span></h2>
+      <div class="grid">${cards}</div>`;
+  }).join('') || '<p class="note">No pets with reference photos are set up yet.</p>';
+  controlsEl.style.display = names.length ? '' : 'none';
+}
+
+function render(result) {
+  lastResult = result;
+  renderSummary(result);
+  renderPets();
+}
+
+sortSel.addEventListener('change', renderPets);
+
+document.getElementById('runForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  runBtn.disabled = true;
+  const resp = await fetch('/api/analysis/refs', {method: 'POST'});
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    statusEl.textContent = 'Error: ' + (err.detail || resp.status);
+    runBtn.disabled = false;
+    return;
+  }
+  poll();
+});
+
+stopBtn.addEventListener('click', async () => {
+  stopBtn.disabled = true;
+  stopBtn.textContent = 'Stopping…';
+  await fetch('/api/analysis/refs/stop', {method: 'POST'});
+});
+
+async function poll() {
+  const resp = await fetch('/api/analysis/refs');
+  const data = await resp.json();
+  const p = data.progress;
+  if (p.running) {
+    runBtn.disabled = true;
+    stopBtn.style.display = '';
+    stopBtn.disabled = false;
+    stopBtn.textContent = 'Stop';
+    statusEl.textContent = p.total ? `Analyzing refs: ${p.current}/${p.total}` : 'Embedding refs…';
+    setTimeout(poll, 1500);
+  } else {
+    runBtn.disabled = false;
+    stopBtn.style.display = 'none';
+    if (data.result) {
+      render(data.result);
+      const partial = data.result.config && data.result.config.partial;
+      statusEl.textContent = partial ? 'Stopped early.' : 'Done.';
+    } else {
+      statusEl.textContent = '';
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "Not a pet" (negatives) analysis — an independent flow against /api/analysis/negatives.
+// ---------------------------------------------------------------------------
+const negStatusEl = document.getElementById('negStatus');
+const negConfigEl = document.getElementById('negConfigLine');
+const negSummaryEl = document.getElementById('negSummary');
+const negsEl = document.getElementById('negs');
+const negControlsEl = document.getElementById('negControls');
+const negSortSel = document.getElementById('negSortSel');
+const negRunBtn = document.getElementById('negRunBtn');
+const negStopBtn = document.getElementById('negStopBtn');
+
+// For a negative, a HIGH held-out pet probability is the good signal (a hard negative worth
+// keeping), the opposite of a pet ref's self score.
+const NEG_HARD_LIKENESS = 0.5;
+const NEG_DUP_REDUNDANCY = 0.95;
+const NEG_VERDICTS = {
+  hard:      {cls: 'loadbearing', label: 'Hard negative'},
+  duplicate: {cls: 'duplicate',   label: 'Near-duplicate'},
+  filler:    {cls: 'redundant',   label: 'Filler'},
+  skip:      {cls: 'skip',        label: 'Not embedded'},
+};
+
+function negVerdictKey(n) {
+  if (!n.embedded) return 'skip';
+  if (n.pet_likeness !== null && n.pet_likeness >= NEG_HARD_LIKENESS) return 'hard';
+  if (n.redundancy !== null && n.redundancy > NEG_DUP_REDUNDANCY) return 'duplicate';
+  return 'filler';
+}
+
+function negCardHtml(n) {
+  const v = NEG_VERDICTS[negVerdictKey(n)];
+  const likeCls = n.pet_likeness !== null && n.pet_likeness >= NEG_HARD_LIKENESS ? 'good' : '';
+  const redCls = n.redundancy !== null && n.redundancy > NEG_DUP_REDUNDANCY ? 'bad'
+               : n.redundancy !== null && n.redundancy > 0.9 ? 'warn' : '';
+  const simTxt = n.pet_similarity !== null && n.pet_similarity !== undefined
+    ? ` <span class="k">${n.pet_similarity.toFixed(2)}</span>` : '';
+  const sub = (n.pet_likeness !== null && n.confused_pet)
+    ? `<div class="subnote">most like ${n.confused_pet}${simTxt}</div>` : '';
+  return `<a class="card" href="${window._immichUrl || ''}/photos/${n.asset_id}" target="_blank">
+    <img src="${cropUrl(n)}" loading="lazy">
+    <span class="verdict ${v.cls}">${v.label}</span>
+    <div class="metrics">
+      <div class="metric"><span class="k">Pet-like</span><span class="v ${likeCls}">${pct(n.pet_likeness)}</span></div>
+      <div class="metric"><span class="k">Redundancy</span><span class="v ${redCls}">${pct(n.redundancy)}</span></div>
+    </div>
+    ${sub}
+  </a>`;
+}
+
+function sortNegs(items, mode) {
+  const key = mode.startsWith('pet') ? 'pet_likeness' : 'redundancy';
+  return [...items].sort((a, b) => {
+    const av = a[key], bv = b[key];
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;   // nulls always last
+    if (bv === null) return -1;
+    return bv - av;              // both options sort descending
+  });
+}
+
+let negResult = null;
+
+function renderNegSummary(result) {
+  const cfg = result.config;
+  const counts = {};
+  for (const n of result.negatives.items) {
+    const k = negVerdictKey(n);
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  const order = ['hard', 'duplicate', 'filler', 'skip'];
+  negSummaryEl.innerHTML = order.filter(k => counts[k]).map(k =>
+    `<span class="pill verdict ${NEG_VERDICTS[k].cls}">${counts[k]} ${NEG_VERDICTS[k].label}</span>`).join('');
+  let line = `Models: CLIP ${cfg.clip_model} (${cfg.clip_pretrained}), YOLO ${cfg.yolo_model}. ${cfg.n_negatives} negatives`;
+  if (cfg.n_negatives_analyzed !== cfg.n_negatives) line += `, ${cfg.n_negatives_analyzed} analyzed`;
+  if (cfg.neg_subsampled) line += ' (subsampled to bound runtime)';
+  line += '.';
+  if (cfg.partial) line += ' Stopped early: some negatives have no score yet.';
+  negConfigEl.textContent = line;
+}
+
+function renderNegs() {
+  if (!negResult) { negsEl.innerHTML = ''; negControlsEl.style.display = 'none'; return; }
+  const items = sortNegs(negResult.negatives.items, negSortSel.value);
+  negsEl.innerHTML = items.length
+    ? `<div class="grid">${items.map(negCardHtml).join('')}</div>`
+    : '<p class="note">No &ldquo;not a pet&rdquo; photos are set up yet.</p>';
+  negControlsEl.style.display = items.length ? '' : 'none';
+}
+
+function renderNeg(result) {
+  negResult = result;
+  renderNegSummary(result);
+  renderNegs();
+}
+
+negSortSel.addEventListener('change', renderNegs);
+
+document.getElementById('negRunForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  negRunBtn.disabled = true;
+  const resp = await fetch('/api/analysis/negatives', {method: 'POST'});
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    negStatusEl.textContent = 'Error: ' + (err.detail || resp.status);
+    negRunBtn.disabled = false;
+    return;
+  }
+  negPoll();
+});
+
+negStopBtn.addEventListener('click', async () => {
+  negStopBtn.disabled = true;
+  negStopBtn.textContent = 'Stopping…';
+  await fetch('/api/analysis/negatives/stop', {method: 'POST'});
+});
+
+async function negPoll() {
+  const resp = await fetch('/api/analysis/negatives');
+  const data = await resp.json();
+  const p = data.progress;
+  if (p.running) {
+    negRunBtn.disabled = true;
+    negStopBtn.style.display = '';
+    negStopBtn.disabled = false;
+    negStopBtn.textContent = 'Stop';
+    negStatusEl.textContent = p.total ? `Analyzing negatives: ${p.current}/${p.total}` : 'Embedding negatives…';
+    setTimeout(negPoll, 1500);
+  } else {
+    negRunBtn.disabled = false;
+    negStopBtn.style.display = 'none';
+    if (data.result) {
+      renderNeg(data.result);
+      const partial = data.result.config && data.result.config.partial;
+      negStatusEl.textContent = partial ? 'Stopped early.' : 'Done.';
+    } else {
+      negStatusEl.textContent = '';
+    }
+  }
+}
+
+async function init() {
+  try {
+    const cfg = await (await fetch('/api/config')).json();
+    window._immichUrl = cfg.immich_external_url || '';
+  } catch (e) { window._immichUrl = ''; }
+  poll();
+  negPoll();
+}
+init();
+</script>
+</body>
+</html>

@@ -1053,6 +1053,427 @@ async def _run_benchmark(
         state.benchmark_progress["running"] = False
 
 
+# ---------------------------------------------------------------------------
+# Reference photo analysis
+#
+# Diagnostic (not part of the tagging pipeline) that scores each reference photo by
+# how much it contributes to the classifier, so the user can prune dead-weight refs
+# and spot bad crops. Two independent signals per ref, see refanalysis.html:
+#   - redundancy: max cosine similarity of this ref's CLIP embedding to the pet's
+#     OTHER refs. High means it is a near-duplicate carrying little new information.
+#   - leave-one-out (LOO): drop this one ref, retrain, and measure two things:
+#       * self_score  - the model's predicted probability for the pet on this ref's
+#         own crop when it was NOT trained on it. Low means an outlier the rest of
+#         the refs don't explain: a genuinely informative hard case, or a bad crop.
+#       * influence   - how much the other refs' correct-class probability drops when
+#         this ref is removed. Positive = load-bearing (removing it hurts the pet);
+#         near zero = contributes nothing; negative = removing it actually helps, i.e.
+#         it is pulling the boundary the wrong way (a likely bad/mislabeled ref).
+# Ref sets are tiny (dozens per pet) so full LOO retraining is cheap; it still runs in
+# the background with progress since embedding uncached refs needs the CLIP workers.
+# ---------------------------------------------------------------------------
+
+@router.post("/analysis/refs")
+async def start_ref_analysis():
+    """Kick off the reference-photo analysis over the currently enrolled pets and
+    negatives (no parameters: it always reflects the live refs). Runs in the background;
+    poll GET /analysis/refs for progress and the result. See refanalysis.html."""
+    if state.refanalysis_progress["running"]:
+        raise HTTPException(status_code=409, detail="A ref analysis is already running")
+    state.refanalysis_generation += 1
+    state.refanalysis_cancel.clear()
+    asyncio.create_task(_run_ref_analysis(state.refanalysis_generation))
+    return {"status": "started"}
+
+
+@router.post("/analysis/refs/stop")
+async def stop_ref_analysis():
+    """Cancel an in-progress ref analysis. Refs already scored keep their numbers; the
+    rest are returned with null LOO scores and the result is flagged partial."""
+    if state.refanalysis_progress["running"]:
+        state.refanalysis_cancel.set()
+    return {"status": "stopping"}
+
+
+@router.get("/analysis/refs")
+async def get_ref_analysis():
+    return {"progress": state.refanalysis_progress, "result": state.refanalysis_result}
+
+
+@router.post("/analysis/negatives")
+async def start_neg_analysis():
+    """Kick off the "not a pet" analysis over the current negatives (no parameters). Runs in
+    the background; poll GET /analysis/negatives for progress and the result. Separate from the
+    ref analysis: see _run_neg_analysis. See refanalysis.html."""
+    if state.neganalysis_progress["running"]:
+        raise HTTPException(status_code=409, detail="A negatives analysis is already running")
+    state.neganalysis_generation += 1
+    state.neganalysis_cancel.clear()
+    asyncio.create_task(_run_neg_analysis(state.neganalysis_generation))
+    return {"status": "started"}
+
+
+@router.post("/analysis/negatives/stop")
+async def stop_neg_analysis():
+    """Cancel an in-progress negatives analysis. Negatives already scored keep their numbers;
+    the rest come back with null scores and the result is flagged partial."""
+    if state.neganalysis_progress["running"]:
+        state.neganalysis_cancel.set()
+    return {"status": "stopping"}
+
+
+@router.get("/analysis/negatives")
+async def get_neg_analysis():
+    return {"progress": state.neganalysis_progress, "result": state.neganalysis_result}
+
+
+def _normalize_rows(m: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(m, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return m / norms
+
+
+# --- Stateless helpers shared by the ref analysis and the negatives analysis. They take an
+# explicit (X, y) so each analysis can build its own model without reaching into the other. ---
+
+def _ra_config_block() -> dict:
+    return {
+        "clip_model": emb.CLIP_MODEL_NAME, "clip_pretrained": emb.CLIP_PRETRAINED,
+        "yolo_model": det.YOLO_MODEL_NAME, "yolo_input_size": det.YOLO_INPUT_SIZE,
+    }
+
+
+def _ra_embed_pet_refs(data_dir):
+    """Embed every enrolled pet's reference photos. Returns (pet_names, ref_records,
+    pet_vecs, pet_row_labels); pet_vecs are the CLIP vectors in ref order, so pet rows
+    occupy indices 0..len(pet_vecs)-1 in any model built on top of them, and each ref_record
+    carries the row indices it contributed so a single ref can be held out."""
+    config = data.load_config(data_dir)
+    all_pet_names = list(config.keys())
+    refs_per_pet = {n: data.load_pet_refs(config[n].get("person_id") or n, data_dir)
+                    for n in all_pet_names}
+    pet_names = [n for n in all_pet_names if refs_per_pet.get(n)]
+    pet_vecs: list = []
+    pet_row_labels: list = []
+    ref_records: list[dict] = []
+    for i, name in enumerate(pet_names):
+        for ref in refs_per_pet[name]:
+            asset_id = ref["asset_id"]
+            bbox = ref.get("bbox")
+            if bbox:
+                vec = emb.embed_crop_by_bbox(asset_id, bbox)
+                vecs = [vec] if vec is not None else []
+            else:
+                vecs = emb.embed_asset_crops(asset_id, require_animal=True)
+                if not vecs:
+                    vecs = emb.embed_asset_crops(asset_id, require_animal=False)
+            rows = list(range(len(pet_vecs), len(pet_vecs) + len(vecs)))
+            pet_vecs.extend(vecs)
+            pet_row_labels.extend([i] * len(vecs))
+            ref_records.append({"pet": name, "asset_id": asset_id,
+                                "crop_idx": ref.get("crop_idx"), "bbox": bbox,
+                                "rows": rows, "vecs": list(vecs)})
+    return pet_names, ref_records, pet_vecs, pet_row_labels
+
+
+def _ra_fit(X, y, mask):
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    from classifier import fit_logreg
+    scaler = StandardScaler()
+    clf = LogisticRegression(max_iter=1000, random_state=0)
+    fit_logreg(clf, scaler.fit_transform(X[mask]), y[mask])
+    return clf, scaler
+
+
+def _ra_correct_probs(X, y, clf, scaler, rows_idx):
+    """Predicted probability of each row's own (correct) class."""
+    if len(rows_idx) == 0:
+        return np.array([])
+    P = clf.predict_proba(scaler.transform(X[rows_idx]))
+    col = {int(c): k for k, c in enumerate(clf.classes_)}
+    out = np.zeros(len(rows_idx))
+    for j, ri in enumerate(rows_idx):
+        c = col.get(int(y[ri]))
+        if c is not None:
+            out[j] = P[j, c]
+    return out
+
+
+def _ra_correct_margins(X, y, clf, scaler, rows_idx):
+    """Log-odds (decision_function) of each row's own class. Unlike probability, this does not
+    saturate near 1.0 on well-separated refs, so removing a ref still produces a measurable
+    shift; influence is measured in this space."""
+    if len(rows_idx) == 0:
+        return np.array([])
+    D = clf.decision_function(scaler.transform(X[rows_idx]))
+    if D.ndim == 1:  # binary case: score is for classes_[1]; classes_[0] is its negation
+        D = np.column_stack([-D, D])
+    col = {int(c): k for k, c in enumerate(clf.classes_)}
+    out = np.zeros(len(rows_idx))
+    for j, ri in enumerate(rows_idx):
+        c = col.get(int(y[ri]))
+        if c is not None:
+            out[j] = D[j, c]
+    return out
+
+
+def _ra_pet_probs(X, clf, scaler, rows_idx, pet_labels):
+    """For each row, the predicted probability of every pet class (columns aligned to
+    pet_labels). Used to ask how pet-like a negative looks when it is held out."""
+    P = clf.predict_proba(scaler.transform(X[rows_idx]))
+    col = {int(c): k for k, c in enumerate(clf.classes_)}
+    out = np.zeros((len(rows_idx), len(pet_labels)))
+    for m, lbl in enumerate(pet_labels):
+        c = col.get(int(lbl))
+        if c is not None:
+            out[:, m] = P[:, c]
+    return out
+
+
+def _ra_set_redundancy(group):
+    """Fill redundancy (max cosine to another member) + nearest_asset_id on records that carry
+    a normalized 'mean' embedding. group is a list of record dicts."""
+    for r in group:
+        r.setdefault("redundancy", None)
+        r.setdefault("nearest_asset_id", None)
+    if len(group) < 2:
+        return
+    M = np.array([r["mean"] for r in group])
+    sims = M @ M.T
+    np.fill_diagonal(sims, -1.0)
+    for k, r in enumerate(group):
+        j = int(np.argmax(sims[k]))
+        r["redundancy"] = round(float(sims[k, j]), 4)
+        r["nearest_asset_id"] = group[j]["asset_id"]
+
+
+async def _run_ref_analysis(generation: int):
+    state.refanalysis_progress = {"current": 0, "total": 0, "running": True}
+
+    def compute():
+        from classifier import embed_negative, subsample_negatives
+        config_block = _ra_config_block()
+        empty = {"config": {**config_block, "n_pets": 0, "n_refs": 0,
+                            "n_negatives": 0, "n_ref_vecs": 0, "partial": False}, "pets": {}}
+
+        with inference_session():
+            pet_names, ref_records, pet_vecs, pet_row_labels = _ra_embed_pet_refs(DATA_DIR)
+            n_pet_rows = len(pet_vecs)
+            if not pet_names or n_pet_rows == 0:
+                return empty
+            unknown_idx = len(pet_names)
+
+            # Negatives -> unknown class, subsampled identically to build_classifier so the
+            # decision boundary (and every score below) matches the production model.
+            negatives = subsample_negatives(data.load_negatives(DATA_DIR), len(ref_records))
+            X_list = list(pet_vecs)
+            y_list = list(pet_row_labels)
+            for entry in negatives:
+                for vec in embed_negative(entry):
+                    X_list.append(vec)
+                    y_list.append(unknown_idx)
+            n_neg_rows = len(X_list) - n_pet_rows
+
+            X = np.array(X_list, dtype=np.float64)
+            y = np.array(y_list, dtype=np.intp)
+            if unknown_idx not in y:
+                # Guarantee the unknown class exists (same guard as build_classifier).
+                X = np.vstack([X, np.zeros((1, X.shape[1]))])
+                y = np.append(y, unknown_idx)
+
+            full_clf, full_scaler = _ra_fit(X, y, np.ones(len(y), dtype=bool))
+            full_margins = _ra_correct_margins(X, y, full_clf, full_scaler, np.arange(n_pet_rows))
+
+            # Redundancy: within each pet, cosine similarity between refs' mean embeddings.
+            per_pet_refs: dict[str, list[dict]] = {n: [] for n in pet_names}
+            for rr in ref_records:
+                if rr["vecs"]:
+                    rr["mean"] = _normalize_rows(np.array(rr["vecs"], dtype=np.float64).mean(axis=0, keepdims=True))[0]
+                    per_pet_refs[rr["pet"]].append(rr)
+            for group in per_pet_refs.values():
+                _ra_set_redundancy(group)
+
+            pet_total_rows: dict[str, int] = {n: 0 for n in pet_names}
+            for rr in ref_records:
+                pet_total_rows[rr["pet"]] += len(rr["rows"])
+
+            analyzable = [rr for rr in ref_records if rr["rows"]]
+            state.refanalysis_progress["total"] = len(analyzable)
+            pet_row_set = set(range(n_pet_rows))
+            cancelled = False
+            done = 0
+            for rr in ref_records:
+                rr.setdefault("redundancy", None)
+                rr.setdefault("nearest_asset_id", None)
+                rr["self_score"] = None
+                rr["influence"] = None
+                if not rr["rows"] or cancelled:
+                    continue
+                # Skip if removing this ref would erase its pet's class entirely.
+                if pet_total_rows[rr["pet"]] > len(rr["rows"]):
+                    mask = np.ones(len(y), dtype=bool)
+                    mask[rr["rows"]] = False
+                    loo_clf, loo_scaler = _ra_fit(X, y, mask)
+                    # Each of this ref's rows is labeled its pet class, so correct_probs on them
+                    # is the held-out own-class probability.
+                    self_p = _ra_correct_probs(X, y, loo_clf, loo_scaler, rr["rows"])
+                    rr["self_score"] = round(float(self_p.mean()), 4) if len(self_p) else None
+                    eval_rows = sorted(pet_row_set - set(rr["rows"]))
+                    if eval_rows:
+                        # Influence = how much the pet's OTHER refs lose correct-class log-odds
+                        # when this ref is dropped. Positive = load-bearing; negative = removing
+                        # it helps. 5 decimals: on well-separated sets even a real influence is
+                        # small, so coarser rounding flattens it.
+                        base = float(full_margins[eval_rows].mean())
+                        loo = float(_ra_correct_margins(X, y, loo_clf, loo_scaler, eval_rows).mean())
+                        rr["influence"] = round(base - loo, 5)
+                done += 1
+                state.refanalysis_progress["current"] = done
+                if state.refanalysis_cancel.is_set():
+                    cancelled = True
+
+            pets_out: dict[str, dict] = {}
+            for name in pet_names:
+                pets_out[name] = {"refs": [
+                    {"asset_id": rr["asset_id"], "crop_idx": rr["crop_idx"], "bbox": rr["bbox"],
+                     "n_vecs": len(rr["vecs"]), "embedded": bool(rr["vecs"]),
+                     "redundancy": rr["redundancy"], "nearest_asset_id": rr["nearest_asset_id"],
+                     "self_score": rr["self_score"], "influence": rr["influence"]}
+                    for rr in ref_records if rr["pet"] == name
+                ]}
+
+            return {"config": {**config_block, "n_pets": len(pet_names),
+                               "n_refs": len(ref_records), "n_negatives": n_neg_rows,
+                               "n_ref_vecs": n_pet_rows, "partial": cancelled}, "pets": pets_out}
+
+    try:
+        state.refanalysis_result = await asyncio.to_thread(compute)
+    finally:
+        state.refanalysis_progress["running"] = False
+
+
+# Cap on how many negatives get the per-negative retrain analysis, to bound runtime; beyond
+# this a deterministic subsample is analyzed and the result is flagged subsampled.
+NEG_ANALYSIS_CAP = 300
+
+
+async def _run_neg_analysis(generation: int):
+    """Companion to _run_ref_analysis for the "not a pet" set. Kept as its own function (and
+    its own model) rather than folded into the ref analysis: a negative's held-out score means
+    the opposite of a pet ref's (looking like a pet is what makes a negative valuable), and it
+    needs every negative in the unknown class, not the balanced subsample the pet model uses."""
+    state.neganalysis_progress = {"current": 0, "total": 0, "running": True}
+
+    def compute():
+        import random
+
+        from classifier import embed_negative
+        config_block = _ra_config_block()
+        empty = {"config": {**config_block, "n_pets": 0, "n_negatives": 0,
+                            "n_negatives_analyzed": 0, "neg_subsampled": False, "partial": False},
+                 "negatives": {"items": []}}
+
+        with inference_session():
+            # Pets define the "looks like a pet" axis; without them there is nothing to score
+            # negatives against.
+            pet_names, ref_records, pet_vecs, pet_row_labels = _ra_embed_pet_refs(DATA_DIR)
+            n_pet_rows = len(pet_vecs)
+            if not pet_names or n_pet_rows == 0:
+                return empty
+            unknown_idx = len(pet_names)
+            pet_labels = list(range(len(pet_names)))
+
+            all_negs = sorted(data.load_negatives(DATA_DIR), key=data.crop_entry_key)
+            base_config = {**config_block, "n_pets": len(pet_names),
+                           "n_negatives": len(all_negs)}
+            if not all_negs:
+                return {"config": {**base_config, "n_negatives_analyzed": 0,
+                                   "neg_subsampled": False, "partial": False},
+                        "negatives": {"items": []}}
+
+            neg_subsampled = len(all_negs) > NEG_ANALYSIS_CAP
+            negs = (sorted(random.Random(0).sample(all_negs, NEG_ANALYSIS_CAP), key=data.crop_entry_key)
+                    if neg_subsampled else all_negs)
+
+            neg_records: list[dict] = []
+            neg_vecs: list = []
+            for entry in negs:
+                vecs = embed_negative(entry)
+                rows = list(range(n_pet_rows + len(neg_vecs), n_pet_rows + len(neg_vecs) + len(vecs)))
+                neg_vecs.extend(vecs)
+                neg_records.append({"asset_id": entry["asset_id"], "bbox": entry.get("bbox"),
+                                    "rows": rows, "vecs": list(vecs)})
+            n_neg_rows = len(neg_vecs)
+
+            # Model: pet refs + ALL analyzed negatives as the unknown class, so each negative
+            # can be held out and asked how pet-like it really is.
+            X = np.array(list(pet_vecs) + list(neg_vecs), dtype=np.float64)
+            y = np.array(pet_row_labels + [unknown_idx] * n_neg_rows, dtype=np.intp)
+
+            # Normalized centroid of each pet's ref embeddings, for a model-free cosine
+            # similarity between a negative and the pet it's confused with (see pet_similarity).
+            pet_arr = np.array(pet_vecs, dtype=np.float64)
+            pet_lbl_arr = np.array(pet_row_labels)
+            pet_centroids = {name: _normalize_rows(pet_arr[pet_lbl_arr == i].mean(axis=0, keepdims=True))[0]
+                             for i, name in enumerate(pet_names) if (pet_lbl_arr == i).any()}
+
+            for nr in neg_records:
+                if nr["vecs"]:
+                    nr["mean"] = _normalize_rows(np.array(nr["vecs"], dtype=np.float64).mean(axis=0, keepdims=True))[0]
+            _ra_set_redundancy([nr for nr in neg_records if nr["vecs"]])
+
+            analyzable = [nr for nr in neg_records if nr["rows"]]
+            state.neganalysis_progress["total"] = len(analyzable)
+            cancelled = False
+            done = 0
+            for nr in neg_records:
+                nr.setdefault("redundancy", None)
+                nr.setdefault("nearest_asset_id", None)
+                nr["pet_likeness"] = None
+                nr["confused_pet"] = None
+                nr["pet_similarity"] = None
+                if not nr["rows"] or cancelled:
+                    continue
+                # Skip if this is the only negative (removing it erases the unknown class).
+                if n_neg_rows > len(nr["rows"]):
+                    mask = np.ones(len(y), dtype=bool)
+                    mask[nr["rows"]] = False
+                    loo_clf, loo_scaler = _ra_fit(X, y, mask)
+                    # Held out, how strongly does the model take this negative for a pet?
+                    pp = _ra_pet_probs(X, loo_clf, loo_scaler, nr["rows"], pet_labels).mean(axis=0)
+                    best = int(np.argmax(pp))
+                    nr["pet_likeness"] = round(float(pp[best]), 4)
+                    nr["confused_pet"] = pet_names[best]
+                    # Model-free cosine similarity to that pet's photos, as a plain "how close
+                    # does it look" number alongside the classifier's pet_likeness.
+                    centroid = pet_centroids.get(nr["confused_pet"])
+                    if centroid is not None and "mean" in nr:
+                        nr["pet_similarity"] = round(float(nr["mean"] @ centroid), 4)
+                done += 1
+                state.neganalysis_progress["current"] = done
+                if state.neganalysis_cancel.is_set():
+                    cancelled = True
+
+            items = [
+                {"asset_id": nr["asset_id"], "bbox": nr["bbox"],
+                 "n_vecs": len(nr["vecs"]), "embedded": bool(nr["vecs"]),
+                 "redundancy": nr["redundancy"], "nearest_asset_id": nr["nearest_asset_id"],
+                 "pet_likeness": nr["pet_likeness"], "confused_pet": nr["confused_pet"],
+                 "pet_similarity": nr["pet_similarity"]}
+                for nr in neg_records
+            ]
+            return {"config": {**base_config, "n_negatives_analyzed": len(neg_records),
+                               "neg_subsampled": neg_subsampled, "partial": cancelled},
+                    "negatives": {"items": items}}
+
+    try:
+        state.neganalysis_result = await asyncio.to_thread(compute)
+    finally:
+        state.neganalysis_progress["running"] = False
+
+
 @router.get("/suggestions/negatives")
 async def get_neg_candidates(limit: int = 60):
     from poller import THRESHOLD
