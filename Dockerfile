@@ -95,10 +95,13 @@ CMD ["python", "/app/main.py"]
 # https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-15.html
 # https://dgpu-docs.intel.com/legacy/installation-guides/installing-packages-from-the-intel-ppa.html
 # Looks like these are currently in debian unstable too.
-RUN printf \
-  "deb [signed-by=/etc/apt/keyrings/intel-graphics.gpg] https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main" \
-  >>/etc/apt/sources.list
-ADD --chmod=444 "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0c0e6af955ce463c03fc51574d098d70afbe5e1f" /etc/apt/keyrings/intel-graphics.gpg
-RUN apt update &&apt install -y \
-  libze1 libze-dev libze-intel-gpu1 \
-  intel-opencl-icd intel-ocloc
+RUN if [ "$XPU" = "true" ]; then \
+  printf "deb [signed-by=/etc/apt/keyrings/intel-graphics.gpg] https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main" \
+    >>/etc/apt/sources.list; \
+  echo "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0c0e6af955ce463c03fc51574d098d70afbe5e1f" \
+    >>/etc/apt/keyrings/intel-graphics.gpg; \
+  chmod 444 /etc/apt/keyrings/intel-graphics.gpg; \
+  apt update &&apt install -y \
+    libze1 libze-dev libze-intel-gpu1 \
+    intel-opencl-icd intel-ocloc ; \
+fi
