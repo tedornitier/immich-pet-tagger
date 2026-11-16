@@ -6,10 +6,12 @@ FROM python:3.12-slim AS builder
 #   NVIDIA (default, Turing+ incl. Blackwell):       set CUDA=true
 #   NVIDIA legacy (Maxwell/Pascal/Volta, no Blackwell): set CUDA=true and CUDA_LEGACY=true
 #   AMD:    set ROCM=true  (requires ROCm drivers on the host)
+#   Intel: set XPU=true
 #   None:   leave all false (CPU-only, slow but works)
 ARG CUDA=false
 ARG CUDA_LEGACY=false
 ARG ROCM=false
+ARG XPU= false
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -32,6 +34,11 @@ RUN if [ "$CUDA" = "true" ] && [ "$CUDA_LEGACY" = "true" ]; then \
         torch==2.7.0 \
         torchvision==0.22.0 \
         --index-url https://download.pytorch.org/whl/rocm6.3; \
+    elif [ "$XPU" = "true" ]; then \
+      pip install --no-cache-dir \
+        torch==2.7.0 \
+        torchvision==0.22.0 \
+        --index-url https://download.pytorch.org/whl/xpu; \
     else \
       pip install --no-cache-dir torch==2.7.0 torchvision==0.22.0 \
         --index-url https://download.pytorch.org/whl/cpu; \
@@ -82,3 +89,16 @@ VOLUME ["/data"]
 EXPOSE 8000
 
 CMD ["python", "/app/main.py"]
+
+
+# Install runtime dependencies for PyTorch w/ Intel Arc (XPU)
+# https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-15.html
+# https://dgpu-docs.intel.com/legacy/installation-guides/installing-packages-from-the-intel-ppa.html
+# Looks like these are currently in debian unstable too.
+RUN printf \
+  "deb [signed-by=/etc/apt/keyrings/intel-graphics.gpg] https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main" \
+  >>/etc/apt/sources.list
+ADD --chmod=444 "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0c0e6af955ce463c03fc51574d098d70afbe5e1f" /etc/apt/keyrings/intel-graphics.gpg
+RUN apt update &&apt install -y \
+  libze1 libze-dev libze-intel-gpu1 \
+  intel-opencl-icd intel-ocloc

@@ -5,7 +5,7 @@ services:
     build:
       context: .
       args:
-        CUDA: "false"  # set to "true" for NVIDIA GPU, or ROCM: "true" for AMD
+        CUDA: "false"  # set to "true" for NVIDIA GPU, ROCM: "true" for AMD, XPU: "true" for Intel
     container_name: immich-pet-tagger
     restart: unless-stopped
     ports:
