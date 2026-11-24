@@ -28,9 +28,11 @@ IOU_THRESHOLD = float(os.environ.get("IOU_THRESHOLD", 0.7))
 # IoU against a much larger box stays low. Each surviving box is then classified
 # on its own, so one animal could be tagged as two different pets.
 # A box is dropped when its IoU with a kept box exceeds IOU_THRESHOLD, or when more
-# than CONTAINMENT_THRESHOLD of its own area lies inside a kept box. Set to 1.0 to
-# disable the containment rule.
-CONTAINMENT_THRESHOLD = float(os.environ.get("CONTAINMENT_THRESHOLD", 0.8))
+# than CONTAINMENT_THRESHOLD of its own area lies inside a kept box. The containment
+# rules are opt-in: the default 1.0 turns them off (a box can never be more than 100%
+# inside another), because they also drop a small pet sitting inside a larger pet's
+# box. 0.8 is a reasonable value to turn them on.
+CONTAINMENT_THRESHOLD = float(os.environ.get("CONTAINMENT_THRESHOLD", 1.0))
 
 # Passed to the model call itself: a permissive floor so boxes are never discarded before
 # reaching Python. The real cutoff (YOLO_CONF, optionally overridden per request, e.g. by
