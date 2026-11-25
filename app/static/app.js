@@ -100,7 +100,7 @@ function showGuide() {
       <div class="guide-step"><div class="guide-step-num">3</div><div class="guide-step-body"><div class="guide-step-title">Add "not a pet" samples</div><div class="guide-step-desc">These teach the classifier what not to tag: empty rooms, other animals of a different species, ambiguous shots with no clear subject. Without them, the classifier will tag almost anything. In the <strong>Not a pet</strong> panel, click <strong>Find candidates</strong> to automatically surface more photos that might confuse the classifier. To add a specific photo directly, click <strong>Add manually</strong> and paste its Immich URL or asset ID.</div></div></div>
       <div class="guide-step"><div class="guide-step-num">4</div><div class="guide-step-body"><div class="guide-step-title">Run a test scan</div><div class="guide-step-desc">Set the <strong>Scan from</strong> date 1–2 weeks back and click <strong>Scan</strong>. Review low confidence results: add correct ones as refs, and click <strong>Ignore</strong> on the rest. Ignored photos won't appear again.</div></div></div>
       <div class="guide-step"><div class="guide-step-num">5</div><div class="guide-step-body"><div class="guide-step-title">Iterate</div><div class="guide-step-desc">Repeat steps 2–4 a couple of times. Results typically stabilize after 2–3 rounds. For a more precise read than eyeballing scan results, use <strong>Tagging accuracy</strong> (📊 icon, top left, or <code>/accuracy.html</code>) to compare against your existing Immich tags and test different thresholds without waiting for a real scan.</div></div></div>
-      <div class="guide-step"><div class="guide-step-num">6</div><div class="guide-step-body"><div class="guide-step-title">Run the full backfill</div><div class="guide-step-desc">Once happy with accuracy, set the scan date to when you got your pet and run the full scan. After that, new photos are tagged automatically every hour.</div></div></div>
+      <div class="guide-step"><div class="guide-step-num">6</div><div class="guide-step-body"><div class="guide-step-title">Run the full backfill</div><div class="guide-step-desc">Once happy with accuracy, set the scan date to when you got your pet and run the full scan. A full backfill can take a while, especially on CPU. To see how many photos are done (for example <code>212 / 409</code>) while it runs, set <code>ENABLE_SCAN_PROGRESS=true</code> and recreate the container (for example <code>docker compose up -d</code>; a plain restart keeps the old environment). After that, new photos are tagged automatically every hour.</div></div></div>
     </div>
   </div>`;
   selectedCrops.clear(); lastClickedKey = null; updateSelUI();
@@ -635,7 +635,24 @@ function prefillScanUntil() {
 }
 
 async function loadScanResult() {
-  try { showScanResult(await api('/api/scan/result')); } catch(_) {}
+  try {
+    const r = await api('/api/scan/result');
+    showScanResult(r);
+    // 'total' is only present with ENABLE_SCAN_PROGRESS on; resume live updates after a reload.
+    if (r.status === 'running' && 'total' in r) pollScanResult();
+  } catch(_) {}
+}
+
+let scanPollTimer = null;
+function pollScanResult() {
+  clearInterval(scanPollTimer);
+  scanPollTimer = setInterval(async () => {
+    try {
+      const r = await api('/api/scan/result');
+      showScanResult(r);
+      if (r.status !== 'running') { clearInterval(scanPollTimer); scanPollTimer = null; }
+    } catch(_) {}
+  }, 2000);
 }
 
 function showScanResult(r) {
@@ -649,7 +666,22 @@ function showScanResult(r) {
     stopBtn.style.display = '';
     const dateStr = r.current_date ? new Date(r.current_date + 'T00:00:00').toLocaleDateString() : '';
     const c = r.counts || {};
+    // total/processed are only sent when ENABLE_SCAN_PROGRESS is on.
+    let progress = '', pct = null;
+    // The panel is rebuilt on every poll, so start the new fill at the old width to let it animate.
+    const prevWidth = el.querySelector('.scan-progress-fill')?.style.width;
+    if ('total' in r) {
+      if (r.total == null) {
+        progress = '<div style="font-size:11px;color:var(--text3);margin-top:4px;">Preparing scan…</div>';
+      } else if (r.total > 0) {
+        const done = Math.min(r.processed || 0, r.total);
+        pct = Math.round(done / r.total * 100);
+        progress = `<div class="scan-progress"><div class="scan-progress-text"><span>${done} / ${r.total}</span><span>${pct}%</span></div>` +
+          `<div class="scan-progress-bar" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="${r.total}" aria-valuenow="${done}"><div class="scan-progress-fill" style="width:${prevWidth || pct + '%'}"></div></div></div>`;
+      }
+    }
     el.innerHTML = '<div class="scan-result-header">Scanning…</div>' +
+      progress +
       (dateStr ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">${dateStr}</div>` : '') +
       '<div class="poll-stats" style="margin-top:6px;">' +
       stat('Tagged', c.added || 0, 'nonzero-good') +
@@ -658,6 +690,11 @@ function showScanResult(r) {
       stat('Already tagged', c.already_tagged || 0, '') +
       (c.failed > 0 ? stat('Failed', c.failed, 'nonzero-bad') : '') +
       '</div>';
+    const fill = el.querySelector('.scan-progress-fill');
+    if (fill && prevWidth) {
+      void fill.offsetWidth; // commit the old width so the change below transitions
+      fill.style.width = pct + '%';
+    }
     return;
   }
   stopBtn.style.display = 'none';
@@ -784,13 +821,7 @@ async function applyTimestamp() {
   try {
     await api('/api/scan', { method: 'POST', body: { scan_since: val, scan_until: untilVal } });
     showScanResult({ status: 'running' });
-    const iv = setInterval(async () => {
-      try {
-        const r = await api('/api/scan/result');
-        showScanResult(r);
-        if (r.status !== 'running') { clearInterval(iv); }
-      } catch(_) {}
-    }, 2000);
+    pollScanResult();
   } catch(e) {
     toast(e.message, 'error');
   }

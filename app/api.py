@@ -36,6 +36,7 @@ IMMICH_EXTERNAL_URL = os.environ.get("IMMICH_EXTERNAL_URL", "http://localhost:22
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 PETS_DIR = DATA_DIR / "pets"
 LONG_REQUEST_TIMEOUT = int(os.environ.get("LONG_REQUEST_TIMEOUT", 120))
+ENABLE_SCAN_PROGRESS = os.environ.get("ENABLE_SCAN_PROGRESS", "false").strip().lower() in ("1", "true", "yes", "on")
 KEEPALIVE_INTERVAL = 15
 
 
@@ -1221,7 +1222,9 @@ async def _run_manual_scan(generation: int, scan_since: str, scan_until: str | N
             state.manual_scan_result["current_date"] = date_str
 
     def on_counts(counts):
-        live_counts.clear()
+        # Each message is a full snapshot and keys are never removed mid-scan, so a single
+        # update() is enough. A clear() first would let a concurrent /scan/result read see
+        # empty counts (no total, every counter 0) between the two calls.
         live_counts.update(counts)
 
     try:
@@ -1250,7 +1253,13 @@ async def get_scan_result():
     skipped = set(data.load_skipped_ids(DATA_DIR)) | set(data.load_negative_ids(DATA_DIR))
     filtered_count = len({a["asset_id"] for a in (state.scan_low_conf_assets or []) if a["asset_id"] not in skipped})
     counts = {**result.get("counts", {}), "low_confidence": filtered_count}
-    return {**result, "counts": counts}
+    processed = counts.pop("processed", 0)
+    response = {**result, "counts": counts}
+    if ENABLE_SCAN_PROGRESS and result.get("status") == "running":
+        # total stays None until the asset list has been fetched from Immich.
+        response["total"] = counts.get("fetched")
+        response["processed"] = processed
+    return response
 
 
 @router.get("/scan/low-confidence")
