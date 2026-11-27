@@ -177,6 +177,8 @@ Once you're happy with the accuracy on the test window:
 1. Set the scan date to the earliest date you want to tag. A good starting point is the date you got your pet.
 2. Click **Scan** to process all photos in that range
 
+A full backfill can take a while, especially on CPU. To see how many photos are done (for example `212 / 409`) while it runs, set `ENABLE_SCAN_PROGRESS=true` and recreate the container (for example `docker compose up -d`; a plain restart keeps the old environment).
+
 After that, the background poller runs every hour (`POLL_INTERVAL`) and tags new photos automatically. Your pets appear in Immich's **People** section.
 
 ---
@@ -214,6 +216,7 @@ Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `YOLO_CONF` | `0.25` (`0.2` in docker-compose.yml) | Min YOLO detection confidence (0–1) to count as a real crop. Lower catches more (small, turned-away, or partially visible pets) but crops get noisier. Below this, tagging falls back to embedding the whole photo instead of a crop. |
 | `IOU_THRESHOLD` | `0.7` | YOLO's NMS IoU threshold (0–1). Overlapping detections whose boxes overlap more than this fraction are merged into one. Lower this if two cuddling/overlapping pets in the same photo are being collapsed into a single detection. |
 | `LONG_REQUEST_TIMEOUT` | `120` | Max seconds for CPU-heavy UI requests (Find missed, Find candidates, Find references). Responses stream keepalive bytes so browsers do not drop idle connections. |
+| `ENABLE_SCAN_PROGRESS` | `false` | Show a progress bar with processed / total photos in the sidebar while a manual scan runs, and add `total` and `processed` to the `/api/scan/result` response. `total` is `null` until the photo list has been fetched from Immich. Reloading the page during a scan resumes the live updates. |
 
 ---
 

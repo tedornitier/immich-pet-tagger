@@ -123,6 +123,10 @@ body { font-family: 'SF Pro Display','Segoe UI',system-ui,sans-serif; background
 .scan-row { display: flex; gap: 6px; align-items: center; }
 .scan-result { padding: 8px 10px; border-bottom: 0.5px solid var(--border); }
 .scan-result-header { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); margin-bottom: 4px; }
+.scan-progress { margin-top: 6px; }
+.scan-progress-text { display: flex; justify-content: space-between; font-size: 11px; color: var(--text3); margin-bottom: 3px; }
+.scan-progress-bar { height: 4px; border-radius: 2px; background: var(--border2); overflow: hidden; }
+.scan-progress-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
 .poll-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
 .poll-stat { display: flex; justify-content: space-between; font-size: 11px; }
 .poll-stat-label { color: var(--text3); }

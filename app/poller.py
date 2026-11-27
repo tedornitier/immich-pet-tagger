@@ -132,10 +132,16 @@ def run_poll_cycle(data_dir: str, on_date=None, cancel=None, low_conf_out=None, 
     try:
         _run_poll_cycle(dd, counts, on_date, cancel, low_conf_out, manual, scan_until, scan_since)
     except Exception as e:
-        data.write_poll_status(dd, {"status": "error", "ran_at": datetime.now(timezone.utc).isoformat(), "error": str(e), "counts": counts})
+        data.write_poll_status(dd, {"status": "error", "ran_at": datetime.now(timezone.utc).isoformat(), "error": str(e), "counts": _persisted_counts(counts)})
         raise
     else:
-        data.write_poll_status(dd, {"status": "idle", "ran_at": datetime.now(timezone.utc).isoformat(), "counts": counts})
+        data.write_poll_status(dd, {"status": "idle", "ran_at": datetime.now(timezone.utc).isoformat(), "counts": _persisted_counts(counts)})
+
+
+def _persisted_counts(counts: dict) -> dict:
+    """`processed` is only live scan progress, so keep it out of poll_status.json and the
+    /api/poll-status response, which stay as they were before scan progress existed."""
+    return {k: v for k, v in counts.items() if k != "processed"}
 
 
 def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_out=None, manual: bool = False, scan_until: str | None = None, scan_since: str | None = None) -> None:
@@ -186,6 +192,7 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
         assets = imm.fetch_assets_created_after(last_ts)
     log.info(f"Fetched {len(assets)} assets in {time.time()-t0:.1f}s")
     counts["fetched"] = len(assets)
+    counts["processed"] = 0
 
     if not assets:
         log.info("No new assets.")
@@ -312,6 +319,8 @@ def _run_poll_cycle(dd: Path, counts: dict, on_date=None, cancel=None, low_conf_
             except Exception as e:
                 log.warning(f"Asset {futures[future]} failed: {e}")
                 mark_failed(futures[future])
+            with _count_lock:
+                counts["processed"] += 1
 
     elapsed = time.time() - t0
     clip_avg = emb.get_avg_batch_size()
