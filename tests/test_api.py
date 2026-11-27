@@ -88,7 +88,6 @@ def test_reset_pet_immich_removes_review_tag(monkeypatch, tmp_path):
 
 def test_scan_result_running_includes_progress(tmp_path, monkeypatch):
     import state
-    monkeypatch.setattr(api, "ENABLE_SCAN_PROGRESS", True)
     monkeypatch.setattr(api, "DATA_DIR", tmp_path)
     monkeypatch.setattr(state, "scan_low_conf_assets", [])
     monkeypatch.setattr(state, "manual_scan_result", {
@@ -103,7 +102,6 @@ def test_scan_result_running_includes_progress(tmp_path, monkeypatch):
 
 def test_scan_result_running_before_fetch_has_null_total(tmp_path, monkeypatch):
     import state
-    monkeypatch.setattr(api, "ENABLE_SCAN_PROGRESS", True)
     monkeypatch.setattr(api, "DATA_DIR", tmp_path)
     monkeypatch.setattr(state, "scan_low_conf_assets", [])
     monkeypatch.setattr(state, "manual_scan_result", {"status": "running", "started_at": "x", "counts": {}})
@@ -114,7 +112,6 @@ def test_scan_result_running_before_fetch_has_null_total(tmp_path, monkeypatch):
 
 def test_scan_result_finished_has_no_progress_fields(tmp_path, monkeypatch):
     import state
-    monkeypatch.setattr(api, "ENABLE_SCAN_PROGRESS", True)
     monkeypatch.setattr(api, "DATA_DIR", tmp_path)
     monkeypatch.setattr(state, "scan_low_conf_assets", [])
     monkeypatch.setattr(state, "manual_scan_result", {"status": "idle", "ran_at": "x", "counts": {"fetched": 5, "processed": 5}})
@@ -123,27 +120,11 @@ def test_scan_result_finished_has_no_progress_fields(tmp_path, monkeypatch):
     assert "processed" not in r["counts"]
 
 
-def test_scan_result_progress_disabled_by_default(tmp_path, monkeypatch):
-    """With ENABLE_SCAN_PROGRESS off, a running scan's response matches the pre-flag shape."""
-    import state
-    monkeypatch.setattr(api, "ENABLE_SCAN_PROGRESS", False)
-    monkeypatch.setattr(api, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(state, "scan_low_conf_assets", [])
-    monkeypatch.setattr(state, "manual_scan_result", {
-        "status": "running", "started_at": "x", "counts": {"added": 1, "fetched": 10, "processed": 4},
-    })
-    r = asyncio.run(api.get_scan_result())
-    assert "total" not in r and "processed" not in r
-    assert "processed" not in r["counts"]
-    assert r["counts"]["added"] == 1
-
-
 def test_manual_scan_progress_flows_from_on_counts_to_scan_result(tmp_path, monkeypatch):
     """Counts relayed mid-scan show up as total/processed, and a later snapshot never
     leaves the result without a total (no clear-then-update gap)."""
     import inference
     import state
-    monkeypatch.setattr(api, "ENABLE_SCAN_PROGRESS", True)
     monkeypatch.setattr(api, "DATA_DIR", tmp_path)
     seen = []
 

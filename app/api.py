@@ -35,7 +35,6 @@ IMMICH_EXTERNAL_URL = os.environ.get("IMMICH_EXTERNAL_URL", "http://localhost:22
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 PETS_DIR = DATA_DIR / "pets"
 LONG_REQUEST_TIMEOUT = int(os.environ.get("LONG_REQUEST_TIMEOUT", 120))
-ENABLE_SCAN_PROGRESS = os.environ.get("ENABLE_SCAN_PROGRESS", "false").strip().lower() in ("1", "true", "yes", "on")
 KEEPALIVE_INTERVAL = 15
 
 
@@ -1302,7 +1301,7 @@ async def get_scan_result():
     counts = {**result.get("counts", {}), "low_confidence": filtered_count}
     processed = counts.pop("processed", 0)
     response = {**result, "counts": counts}
-    if ENABLE_SCAN_PROGRESS and result.get("status") == "running":
+    if result.get("status") == "running":
         # total stays None until the asset list has been fetched from Immich.
         response["total"] = counts.get("fetched")
         response["processed"] = processed
