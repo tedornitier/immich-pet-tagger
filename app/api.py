@@ -196,7 +196,7 @@ async def list_pets():
         {"name": name, "person_id": cfg.get("person_id"), "since": cfg.get("since"),
          "until": cfg.get("until"), "description": cfg.get("description"),
          "ref_count": len(data.load_pet_refs(cfg.get("person_id") or name, DATA_DIR))}
-        for name, cfg in config.items()
+        for name, cfg in sorted(config.items(), key=lambda kv: kv[0].casefold())
     ]}
 
 

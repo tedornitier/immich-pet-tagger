@@ -145,3 +145,12 @@ def test_manual_scan_progress_flows_from_on_counts_to_scan_result(tmp_path, monk
     asyncio.run(go())
     assert [(r["total"], r["processed"]) for r in seen] == [(10, 3), (10, 7)]
     assert all("processed" not in r["counts"] for r in seen)
+
+
+def test_list_pets_sorted_by_name_case_insensitive(monkeypatch):
+    import data
+    config = {"mautz": {}, "Dobby": {}, "chewbacca": {}, "Bella": {}}
+    monkeypatch.setattr(data, "load_config", lambda dd: config)
+    monkeypatch.setattr(data, "load_pet_refs", lambda pid, dd: [])
+    r = asyncio.run(api.list_pets())
+    assert [p["name"] for p in r["pets"]] == ["Bella", "chewbacca", "Dobby", "mautz"]
