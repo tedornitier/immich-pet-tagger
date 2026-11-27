@@ -799,12 +799,18 @@ async def get_borderline(name: str, limit: int = 40):
                         done += 1
                         state.borderline_progress["current"] = done
                         a = futures[future]
+                        probs = []
                         for c, vec in (future.result() or []):
                             if data.crop_entry_matches(neg_index, a["id"], c["bbox"]):
                                 continue
                             v = np.asarray(vec, dtype=np.float64).reshape(1, -1)
-                            pet_prob = float(clf.predict_proba(scaler.transform(v))[0][pet_idx])
-                            if LOW <= pet_prob < HIGH:
+                            probs.append((float(clf.predict_proba(scaler.transform(v))[0][pet_idx]), c))
+                        # The pet is already found in this photo, so its other crops are other
+                        # animals or parts of it, not references (see #63).
+                        if any(p >= HIGH for p, _ in probs):
+                            continue
+                        for pet_prob, c in probs:
+                            if LOW <= pet_prob:
                                 scored.append((pet_prob, {**_slim_asset(a), "crops": [c], "score": round(pet_prob, 3)}))
                 if not scored and model_error_count() > errors_before:
                     raise _finder_error("", errors_before)

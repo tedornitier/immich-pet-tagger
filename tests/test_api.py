@@ -154,3 +154,50 @@ def test_list_pets_sorted_by_name_case_insensitive(monkeypatch):
     monkeypatch.setattr(data, "load_pet_refs", lambda pid, dd: [])
     r = asyncio.run(api.list_pets())
     assert [p["name"] for p in r["pets"]] == ["Bella", "chewbacca", "Dobby", "mautz"]
+
+
+def test_borderline_skips_photo_where_pet_is_already_confident(monkeypatch):
+    """A photo whose best crop already passes the threshold drops its other crops (see #63)."""
+    import contextlib
+    import json as _json
+
+    import data
+    import embedder as emb
+    import poller
+
+    class _Clf:
+        def predict_proba(self, v):
+            p = float(v[0][0])
+            return [[p, 1 - p]]
+
+    class _Scaler:
+        def transform(self, v):
+            return v
+
+    crops = {
+        "both": [({"crop_idx": 0, "bbox": [0.4, 0.1, 0.7, 0.9]}, [0.95]),
+                 ({"crop_idx": 1, "bbox": [0.9, 0.3, 1.0, 0.6]}, [0.6])],
+        "unsure": [({"crop_idx": 0, "bbox": [0.1, 0.1, 0.5, 0.9]}, [0.6])],
+    }
+    monkeypatch.setattr(poller, "THRESHOLD", 0.8)
+    monkeypatch.setattr(data, "load_config", lambda dd: {"Rex": {"person_id": "p1"}})
+    monkeypatch.setattr(data, "load_pet_asset_ids", lambda pid, dd: ["ref"])
+    monkeypatch.setattr(data, "load_negatives", lambda dd: [])
+    monkeypatch.setattr(data, "load_skipped_ids", lambda dd: [])
+
+    async def fake_search(client, ref_ids, cfg, exclude):
+        return [{"id": aid} for aid in crops]
+
+    monkeypatch.setattr(api, "_visual_search", fake_search)
+    monkeypatch.setattr(api, "_slim_asset", lambda a: {"id": a["id"]})
+    monkeypatch.setattr(api, "_build_classifier_from_config", lambda cfg: (["Rex", "unknown"], _Clf(), _Scaler()))
+    monkeypatch.setattr(api, "inference_session", contextlib.nullcontext)
+    monkeypatch.setattr(emb, "get_crops_and_embed", lambda aid: crops[aid])
+
+    async def run():
+        resp = await api.get_borderline("Rex")
+        body = b"".join([chunk async for chunk in resp.body_iterator])
+        return _json.loads(body)
+
+    r = asyncio.run(run())
+    assert [(a["id"], a["crops"][0]["crop_idx"]) for a in r["assets"]] == [("unsure", 0)]

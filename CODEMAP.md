@@ -42,33 +42,33 @@ API routes for the enrollment UI. All Immich communication happens here; the bro
 - `_finder_error(summary, errors_before)` L669: Error for a finder that could not score anything: summary plus the model failure recorded since errors_before, if any. build_response turns it into a 503.
 - `async get_suggestions(name, limit)` L677
 - `async get_borderline(name, limit)` L748
-- `async get_borderline_progress(name)` L833
-- `class BenchmarkRequest` L840
-- `async start_benchmark(body)` L847: Diagnostic, not part of the tagging pipeline: dry-run classify every asset (photo and video) in the given date range and compare against the actual Immich tags (source of truth). Runs in the background since a full library can take several minutes; poll GET /analysis/benchmark for progress and the result. See accuracy.html.
-- `async stop_benchmark()` L877: Cancels an in-progress benchmark. Whatever was already classified before the cancel is still assembled into a usable result (same as a completed run), not discarded, since a partial answer over most of the range beats none at all.
-- `async get_benchmark()` L887
-- `async set_benchmark_result(body)` L892: Store an externally-provided result (e.g. a file re-imported in accuracy.html) as the current one, so /download can serve it back too, not just freshly-run results.
-- `async download_benchmark()` L900: Serves the current result as a file attachment via Content-Disposition instead of a client-side blob URL: some browsers don't reliably honor the <a download> attribute on blob: URLs, silently saving with the blob's internal id and no extension instead. Filename encodes the run's YOLO confidence and date range, not just today's date, so several downloaded results sitting in the same folder stay distinguishable at a glance without having to open each one.
-- `_benchmark_bucket(asset_type, yolo_detected)` L932: Split by detected vs whole-image fallback, and by photo vs video (a video only ever classifies a single sampled frame, so its numbers behave differently from a photo's). A strong/weak split by detection confidence was tried and measured worse: at matched recall, splitting out a separate 'weak' tier and giving it its own threshold produced a higher false-positive rate than just raising the YOLO_CONF floor and using one threshold for every detection.
-- `async _run_benchmark(generation, since, until, yolo_conf_override)` L945
-- `async get_neg_candidates(limit)` L1057
-- `async get_neg_progress()` L1139
-- `async get_poll_status()` L1148
-- `class PetImport` L1152
-- `async import_pet(body)` L1161
-- `class ScanRequest` L1226
-- `async trigger_scan(body)` L1232
-- `async stop_scan()` L1245
-- `async _run_manual_scan(generation, scan_since, scan_until)` L1254
-- `async get_scan_result()` L1291
-- `async get_scan_low_confidence()` L1312
-- `async list_immich_people()` L1344
-- `_cache_if_ok(status_code, headers)` L1367
-- `async person_thumbnail(person_id)` L1372
-- `async get_asset_crops(asset_id)` L1386: Look up one asset by ID and return its detected animal crops, so a user can manually add a reference or negative by pasting an Immich photo link or ID.
-- `async _grid_thumbnail(asset_id)` L1405: Immich's small thumbnail (about 250px) for grid tiles. The large preview size is only needed as a source for crops and for embedding (embedder.fetch_thumbnail).
-- `async thumbnail(asset_id)` L1418
-- `async animal_crop(asset_id, bbox)` L1423: Return a cropped animal region by bbox (x1,y1,x2,y2 normalized), or the full thumbnail.
+- `async get_borderline_progress(name)` L839
+- `class BenchmarkRequest` L846
+- `async start_benchmark(body)` L853: Diagnostic, not part of the tagging pipeline: dry-run classify every asset (photo and video) in the given date range and compare against the actual Immich tags (source of truth). Runs in the background since a full library can take several minutes; poll GET /analysis/benchmark for progress and the result. See accuracy.html.
+- `async stop_benchmark()` L883: Cancels an in-progress benchmark. Whatever was already classified before the cancel is still assembled into a usable result (same as a completed run), not discarded, since a partial answer over most of the range beats none at all.
+- `async get_benchmark()` L893
+- `async set_benchmark_result(body)` L898: Store an externally-provided result (e.g. a file re-imported in accuracy.html) as the current one, so /download can serve it back too, not just freshly-run results.
+- `async download_benchmark()` L906: Serves the current result as a file attachment via Content-Disposition instead of a client-side blob URL: some browsers don't reliably honor the <a download> attribute on blob: URLs, silently saving with the blob's internal id and no extension instead. Filename encodes the run's YOLO confidence and date range, not just today's date, so several downloaded results sitting in the same folder stay distinguishable at a glance without having to open each one.
+- `_benchmark_bucket(asset_type, yolo_detected)` L938: Split by detected vs whole-image fallback, and by photo vs video (a video only ever classifies a single sampled frame, so its numbers behave differently from a photo's). A strong/weak split by detection confidence was tried and measured worse: at matched recall, splitting out a separate 'weak' tier and giving it its own threshold produced a higher false-positive rate than just raising the YOLO_CONF floor and using one threshold for every detection.
+- `async _run_benchmark(generation, since, until, yolo_conf_override)` L951
+- `async get_neg_candidates(limit)` L1063
+- `async get_neg_progress()` L1145
+- `async get_poll_status()` L1154
+- `class PetImport` L1158
+- `async import_pet(body)` L1167
+- `class ScanRequest` L1232
+- `async trigger_scan(body)` L1238
+- `async stop_scan()` L1251
+- `async _run_manual_scan(generation, scan_since, scan_until)` L1260
+- `async get_scan_result()` L1297
+- `async get_scan_low_confidence()` L1318
+- `async list_immich_people()` L1350
+- `_cache_if_ok(status_code, headers)` L1373
+- `async person_thumbnail(person_id)` L1378
+- `async get_asset_crops(asset_id)` L1392: Look up one asset by ID and return its detected animal crops, so a user can manually add a reference or negative by pasting an Immich photo link or ID.
+- `async _grid_thumbnail(asset_id)` L1411: Immich's small thumbnail (about 250px) for grid tiles. The large preview size is only needed as a source for crops and for embedding (embedder.fetch_thumbnail).
+- `async thumbnail(asset_id)` L1424
+- `async animal_crop(asset_id, bbox)` L1429: Return a cropped animal region by bbox (x1,y1,x2,y2 normalized), or the full thumbnail.
 Constants: IMMICH_EXTERNAL_URL, DATA_DIR, PETS_DIR, LONG_REQUEST_TIMEOUT, KEEPALIVE_INTERVAL, _VERSION_FILE, BENCHMARK_BUCKETS, SWEEP_SCORE_FLOOR, ASSET_IMAGE_CACHE, PERSON_IMAGE_CACHE, CROP_TILE_MAX
 
 ## app/classifier.py
