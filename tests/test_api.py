@@ -84,3 +84,120 @@ def test_reset_pet_immich_removes_review_tag(monkeypatch, tmp_path):
     assert untag_calls == [("DELETE", f"{immich.IMMICH_URL}/api/tags/tag-9/assets", {"ids": ["asset-1"]})], (
         "reset_pet_immich must strip the review tag from every ref's asset, same as delete_pet does"
     )
+
+
+def test_scan_result_running_includes_progress(tmp_path, monkeypatch):
+    import state
+    monkeypatch.setattr(api, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "scan_low_conf_assets", [])
+    monkeypatch.setattr(state, "manual_scan_result", {
+        "status": "running", "started_at": "2026-11-25T17:43:19+00:00",
+        "counts": {"added": 3, "fetched": 409, "processed": 212},
+    })
+    r = asyncio.run(api.get_scan_result())
+    assert r["total"] == 409
+    assert r["processed"] == 212
+    assert r["counts"]["added"] == 3
+
+
+def test_scan_result_running_before_fetch_has_null_total(tmp_path, monkeypatch):
+    import state
+    monkeypatch.setattr(api, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "scan_low_conf_assets", [])
+    monkeypatch.setattr(state, "manual_scan_result", {"status": "running", "started_at": "x", "counts": {}})
+    r = asyncio.run(api.get_scan_result())
+    assert r["total"] is None
+    assert r["processed"] == 0
+
+
+def test_scan_result_finished_has_no_progress_fields(tmp_path, monkeypatch):
+    import state
+    monkeypatch.setattr(api, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(state, "scan_low_conf_assets", [])
+    monkeypatch.setattr(state, "manual_scan_result", {"status": "idle", "ran_at": "x", "counts": {"fetched": 5, "processed": 5}})
+    r = asyncio.run(api.get_scan_result())
+    assert "total" not in r and "processed" not in r
+    assert "processed" not in r["counts"]
+
+
+def test_manual_scan_progress_flows_from_on_counts_to_scan_result(tmp_path, monkeypatch):
+    """Counts relayed mid-scan show up as total/processed, and a later snapshot never
+    leaves the result without a total (no clear-then-update gap)."""
+    import inference
+    import state
+    monkeypatch.setattr(api, "DATA_DIR", tmp_path)
+    seen = []
+
+    def fake_run_scan(data_dir, *, on_counts, **kw):
+        on_counts({"added": 0, "fetched": 10, "processed": 3})
+        seen.append(asyncio.run(api.get_scan_result()))
+        on_counts({"added": 1, "fetched": 10, "processed": 7})
+        seen.append(asyncio.run(api.get_scan_result()))
+        return {}, []
+
+    monkeypatch.setattr(inference, "run_scan", fake_run_scan)
+
+    async def go():
+        monkeypatch.setattr(state, "scan_lock", asyncio.Lock())
+        state.scan_generation += 1
+        await api._run_manual_scan(state.scan_generation, "2026-01-01")
+
+    asyncio.run(go())
+    assert [(r["total"], r["processed"]) for r in seen] == [(10, 3), (10, 7)]
+    assert all("processed" not in r["counts"] for r in seen)
+
+
+def test_list_pets_sorted_by_name_case_insensitive(monkeypatch):
+    import data
+    config = {"mautz": {}, "Dobby": {}, "chewbacca": {}, "Bella": {}}
+    monkeypatch.setattr(data, "load_config", lambda dd: config)
+    monkeypatch.setattr(data, "load_pet_refs", lambda pid, dd: [])
+    r = asyncio.run(api.list_pets())
+    assert [p["name"] for p in r["pets"]] == ["Bella", "chewbacca", "Dobby", "mautz"]
+
+
+def test_borderline_skips_photo_where_pet_is_already_confident(monkeypatch):
+    """A photo whose best crop already passes the threshold drops its other crops (see #63)."""
+    import contextlib
+    import json as _json
+
+    import data
+    import embedder as emb
+    import poller
+
+    class _Clf:
+        def predict_proba(self, v):
+            p = float(v[0][0])
+            return [[p, 1 - p]]
+
+    class _Scaler:
+        def transform(self, v):
+            return v
+
+    crops = {
+        "both": [({"crop_idx": 0, "bbox": [0.4, 0.1, 0.7, 0.9]}, [0.95]),
+                 ({"crop_idx": 1, "bbox": [0.9, 0.3, 1.0, 0.6]}, [0.6])],
+        "unsure": [({"crop_idx": 0, "bbox": [0.1, 0.1, 0.5, 0.9]}, [0.6])],
+    }
+    monkeypatch.setattr(poller, "THRESHOLD", 0.8)
+    monkeypatch.setattr(data, "load_config", lambda dd: {"Rex": {"person_id": "p1"}})
+    monkeypatch.setattr(data, "load_pet_asset_ids", lambda pid, dd: ["ref"])
+    monkeypatch.setattr(data, "load_negatives", lambda dd: [])
+    monkeypatch.setattr(data, "load_skipped_ids", lambda dd: [])
+
+    async def fake_search(client, ref_ids, cfg, exclude):
+        return [{"id": aid} for aid in crops]
+
+    monkeypatch.setattr(api, "_visual_search", fake_search)
+    monkeypatch.setattr(api, "_slim_asset", lambda a: {"id": a["id"]})
+    monkeypatch.setattr(api, "_build_classifier_from_config", lambda cfg: (["Rex", "unknown"], _Clf(), _Scaler()))
+    monkeypatch.setattr(api, "inference_session", contextlib.nullcontext)
+    monkeypatch.setattr(emb, "get_crops_and_embed", lambda aid: crops[aid])
+
+    async def run():
+        resp = await api.get_borderline("Rex")
+        body = b"".join([chunk async for chunk in resp.body_iterator])
+        return _json.loads(body)
+
+    r = asyncio.run(run())
+    assert [(a["id"], a["crops"][0]["crop_idx"]) for a in r["assets"]] == [("unsure", 0)]

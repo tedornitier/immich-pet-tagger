@@ -196,7 +196,7 @@ async def list_pets():
         {"name": name, "person_id": cfg.get("person_id"), "since": cfg.get("since"),
          "until": cfg.get("until"), "description": cfg.get("description"),
          "ref_count": len(data.load_pet_refs(cfg.get("person_id") or name, DATA_DIR))}
-        for name, cfg in config.items()
+        for name, cfg in sorted(config.items(), key=lambda kv: kv[0].casefold())
     ]}
 
 
@@ -799,12 +799,18 @@ async def get_borderline(name: str, limit: int = 40):
                         done += 1
                         state.borderline_progress["current"] = done
                         a = futures[future]
+                        probs = []
                         for c, vec in (future.result() or []):
                             if data.crop_entry_matches(neg_index, a["id"], c["bbox"]):
                                 continue
                             v = np.asarray(vec, dtype=np.float64).reshape(1, -1)
-                            pet_prob = float(clf.predict_proba(scaler.transform(v))[0][pet_idx])
-                            if LOW <= pet_prob < HIGH:
+                            probs.append((float(clf.predict_proba(scaler.transform(v))[0][pet_idx]), c))
+                        # The pet is already found in this photo, so its other crops are other
+                        # animals or parts of it, not references (see #63).
+                        if any(p >= HIGH for p, _ in probs):
+                            continue
+                        for pet_prob, c in probs:
+                            if LOW <= pet_prob:
                                 scored.append((pet_prob, {**_slim_asset(a), "crops": [c], "score": round(pet_prob, 3)}))
                 if not scored and model_error_count() > errors_before:
                     raise _finder_error("", errors_before)
@@ -1264,7 +1270,9 @@ async def _run_manual_scan(generation: int, scan_since: str, scan_until: str | N
             state.manual_scan_result["current_date"] = date_str
 
     def on_counts(counts):
-        live_counts.clear()
+        # Each message is a full snapshot and keys are never removed mid-scan, so a single
+        # update() is enough. A clear() first would let a concurrent /scan/result read see
+        # empty counts (no total, every counter 0) between the two calls.
         live_counts.update(counts)
 
     try:
@@ -1297,7 +1305,13 @@ async def get_scan_result():
         if a["asset_id"] not in skipped and not data.crop_entry_matches(neg_index, a["asset_id"], a.get("bbox"))
     })
     counts = {**result.get("counts", {}), "low_confidence": filtered_count}
-    return {**result, "counts": counts}
+    processed = counts.pop("processed", 0)
+    response = {**result, "counts": counts}
+    if result.get("status") == "running":
+        # total stays None until the asset list has been fetched from Immich.
+        response["total"] = counts.get("fetched")
+        response["processed"] = processed
+    return response
 
 
 @router.get("/scan/low-confidence")

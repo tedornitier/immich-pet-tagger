@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.11.0
+
+### Features
+- Manual scans now show their progress. The sidebar shows how many photos are done out of the total (for example `212 / 409`) with a progress bar, and reloading the page during a scan picks the live updates back up. Thanks @jasonnoble (see #70, #71).
+
+### Changed
+- Pets are now sorted by name in the sidebar, the add buttons and the scan results, ignoring upper and lower case, instead of the order they were added (see #69).
+
+### Fixed
+- Find references no longer shows other animals from a photo where your pet was already found with confidence. With several animals in one photo, it showed for example the dog next to yours with a 60% score, which looked like the right photo with the wrong crop (see #63).
+
 ## v1.10.0
 
 ### Changed

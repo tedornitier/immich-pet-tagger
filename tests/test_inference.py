@@ -128,3 +128,15 @@ def test_run_scan_cancel_terminates_worker(tmp_path, monkeypatch):
             cancel=cancel,
         )
     assert time.time() - t0 < 10
+
+
+def test_run_scan_relays_progress_counts_unchanged(tmp_path, monkeypatch):
+    """fetched/processed reach on_counts as sent, so the API can build total/processed from them."""
+    counts_seen = []
+    _run_with_stub(
+        tmp_path, monkeypatch,
+        'print(json.dumps({"type": "counts", "counts": {"added": 0, "fetched": 409, "processed": 212}}))\n'
+        'print(json.dumps({"type": "done", "counts": {}, "low_conf": []}))\n',
+        on_counts=counts_seen.append,
+    )
+    assert counts_seen == [{"added": 0, "fetched": 409, "processed": 212}]
