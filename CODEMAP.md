@@ -206,13 +206,15 @@ Constants: _SCAN_WORKER
 
 ## app/main.py
 Main entrypoint for immich-pet-tagger. Starts the FastAPI enrollment UI and the background polling loop.
-- `async polling_loop()` L42
-- `async lifespan(app)` L60
-- `async health()` L79
-- `async status()` L84
-- `async root()` L104
-- `async accuracy_page()` L109
-Constants: BASE_DIR, POLL_INTERVAL, DATA_DIR, LONG_REQUEST_TIMEOUT, NO_CACHE_HEADERS
+- `async polling_loop()` L48
+- `async lifespan(app)` L66
+- `is_cross_site(method, headers)` L78: True if a browser sent this state-changing request on behalf of another website.
+- `async block_cross_site_requests(request, call_next)` L116
+- `async health()` L128
+- `async status()` L133
+- `async root()` L153
+- `async accuracy_page()` L158
+Constants: BASE_DIR, POLL_INTERVAL, DATA_DIR, LONG_REQUEST_TIMEOUT, TRUSTED_ORIGINS, SAFE_METHODS, NO_CACHE_HEADERS
 
 ## app/poller.py
 Poller: incremental classification using a local CLIP model. No DB access. Embeddings computed from thumbnails via the Immich HTTP API.
